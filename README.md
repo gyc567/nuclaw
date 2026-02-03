@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="docs/nuClawLogo.png" alt="NuClaw Logo" width="200"/>
+</div>
+
 # NuClaw - Personal Claude Assistant
 
 A Rust implementation of NanoClaw - a personal Claude assistant that runs securely in isolated containers.
