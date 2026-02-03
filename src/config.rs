@@ -32,14 +32,6 @@ pub fn assistant_name() -> String {
     env::var("ASSISTANT_NAME").unwrap_or_else(|_| "Andy".to_string())
 }
 
-pub fn log_level() -> String {
-    env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string())
-}
-
-pub fn container_image() -> String {
-    env::var("CONTAINER_IMAGE").unwrap_or_else(|_| "nuclaw-agent:latest".to_string())
-}
-
 pub fn timezone() -> String {
     env::var("TZ").unwrap_or_else(|_| "UTC".to_string())
 }

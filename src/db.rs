@@ -1,12 +1,23 @@
 //! Database for NuClaw
 
 use crate::config::store_dir;
-use crate::types::{ChatInfo, NewMessage, ScheduledTask, TaskRunLog};
 use rusqlite::{Connection, Result as SqlResult};
 use std::sync::Mutex;
 
 pub struct Database {
-    connection: Mutex<Connection>,
+    pub connection: Mutex<Connection>,
+}
+
+impl Clone for Database {
+    fn clone(&self) -> Self {
+        let db_path = store_dir().join("nuclaw.db");
+        let connection = Connection::open(&db_path).unwrap_or_else(|_| {
+            panic!("Failed to open database at {:?}", db_path)
+        });
+        Database {
+            connection: Mutex::new(connection),
+        }
+    }
 }
 
 impl Database {
@@ -72,5 +83,22 @@ impl Database {
         Ok(Database {
             connection: Mutex::new(connection),
         })
+    }
+
+    /// Get a connection from the pool
+    pub fn get_connection(&self) -> SqlResult<Connection> {
+        let _guard = self.connection.lock().map_err(|e| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ErrorCode::DatabaseBusy,
+                    extended_code: 5, // SQLITE_BUSY
+                },
+                Some(e.to_string()),
+            )
+        })?;
+        // Return a new connection by opening the same database
+        // This is a workaround since MutexGuard cannot be cloned
+        let db_path = store_dir().join("nuclaw.db");
+        Connection::open(&db_path)
     }
 }

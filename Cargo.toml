@@ -50,7 +50,19 @@ structopt = "0.3"
 # Random for ID generation
 rand = "0.8"
 
+# HTTP client for WhatsApp MCP
+reqwest = { version = "0.12", features = ["json"] }
+
+# Web server for Telegram webhook
+axum = { version = "0.7", features = ["json"] }
+tower = { version = "0.4", features = ["util"] }
+hyper = { version = "0.14", features = ["full"] }
+
+# Process control for container management
+libc = "0.2"
+
 [dev-dependencies]
+libc = "0.2.180"
 tempfile = "3.12"
 
 [profile.release]
