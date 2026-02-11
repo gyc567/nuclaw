@@ -7,20 +7,13 @@
 //! - Scheduled task management
 //! - SQLite persistence
 
-mod config;
-mod container_runner;
-mod db;
-mod error;
-mod task_scheduler;
-mod telegram;
-mod types;
-mod utils;
-mod whatsapp;
-
-pub use config::ensure_directories;
-pub use container_runner::{run_container, ensure_container_system_running};
-pub use error::{NuClawError, Result};
-pub use task_scheduler::TaskScheduler;
+use nuclaw::config;
+use nuclaw::container_runner::{self, ensure_container_system_running};
+use nuclaw::db;
+use nuclaw::error::{NuClawError, Result};
+use nuclaw::task_scheduler::TaskScheduler;
+use nuclaw::telegram;
+use nuclaw::whatsapp;
 
 use structopt::StructOpt;
 use tokio::signal;
@@ -56,12 +49,12 @@ async fn main() -> Result<()> {
     info!("This is a Rust port of NanoClaw");
 
     // Ensure directories exist
-    ensure_directories().map_err(|e| crate::error::NuClawError::FileSystem {
+    config::ensure_directories().map_err(|e| NuClawError::FileSystem {
         message: e.to_string()
     })?;
 
     // Initialize database
-    let db = db::Database::new().map_err(|e| crate::error::NuClawError::Database {
+    let db = db::Database::new().map_err(|e| NuClawError::Database {
         message: e.to_string()
     })?;
     info!("Database initialized successfully");

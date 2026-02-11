@@ -5,6 +5,14 @@ description = "Personal Claude assistant. Lightweight, secure, customizable."
 edition = "2021"
 authors = ["Eric <eric@example.com>"]
 
+[lib]
+name = "nuclaw"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nuclaw"
+path = "src/main.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }

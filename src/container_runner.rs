@@ -297,15 +297,87 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_marked_output_only_start_marker() {
+        let output = "--NANOCLAW_OUTPUT_START--\nsome content";
+        let extracted = extract_marked_output(output);
+        assert!(extracted.is_none());
+    }
+
+    #[test]
+    fn test_extract_marked_output_reversed_markers() {
+        // End marker before start marker should not match
+        let output = "--NANOCLAW_OUTPUT_END--\ncontent\n--NANOCLAW_OUTPUT_START--";
+        let extracted = extract_marked_output(output);
+        assert!(extracted.is_none());
+    }
+
+    #[test]
+    fn test_extract_marked_output_empty_content() {
+        let output = "--NANOCLAW_OUTPUT_START----NANOCLAW_OUTPUT_END--";
+        let extracted = extract_marked_output(output);
+        assert!(extracted.is_some());
+        assert_eq!(extracted.unwrap(), "");
+    }
+
+    #[test]
     fn test_container_timeout_default() {
         let timeout = container_timeout();
         assert_eq!(timeout, Duration::from_millis(DEFAULT_TIMEOUT_MS));
     }
 
     #[test]
+    fn test_container_timeout_from_env() {
+        // Save original value
+        let original = std::env::var("CONTAINER_TIMEOUT").ok();
+        
+        std::env::set_var("CONTAINER_TIMEOUT", "60000");
+        let timeout = container_timeout();
+        assert_eq!(timeout, Duration::from_millis(60000));
+        
+        // Restore original value
+        match original {
+            Some(val) => std::env::set_var("CONTAINER_TIMEOUT", val),
+            None => std::env::remove_var("CONTAINER_TIMEOUT"),
+        }
+    }
+
+    #[test]
+    fn test_container_timeout_invalid_env() {
+        // Save original value
+        let original = std::env::var("CONTAINER_TIMEOUT").ok();
+        
+        std::env::set_var("CONTAINER_TIMEOUT", "invalid");
+        let timeout = container_timeout();
+        // Should fall back to default
+        assert_eq!(timeout, Duration::from_millis(DEFAULT_TIMEOUT_MS));
+        
+        // Restore original value
+        match original {
+            Some(val) => std::env::set_var("CONTAINER_TIMEOUT", val),
+            None => std::env::remove_var("CONTAINER_TIMEOUT"),
+        }
+    }
+
+    #[test]
     fn test_max_output_size_default() {
         let max_size = max_output_size();
         assert_eq!(max_size, DEFAULT_MAX_OUTPUT);
+    }
+
+    #[test]
+    fn test_max_output_size_from_env() {
+        // Save original value
+        let original = std::env::var("CONTAINER_MAX_OUTPUT_SIZE").ok();
+        
+        std::env::set_var("CONTAINER_MAX_OUTPUT_SIZE", "5242880");
+        let max_size = max_output_size();
+        assert_eq!(max_size, 5 * 1024 * 1024);
+        
+        // Restore original value
+        match original {
+            Some(val) => std::env::set_var("CONTAINER_MAX_OUTPUT_SIZE", val),
+            None => std::env::remove_var("CONTAINER_MAX_OUTPUT_SIZE"),
+        }
     }
 
     #[test]
@@ -319,6 +391,16 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_container_output_with_session_id() {
+        let output = r#"{"status": "success", "result": "test", "new_session_id": "sess_123"}"#;
+        let result = parse_container_output(output, true, 100);
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.status, "success");
+        assert_eq!(output.new_session_id, Some("sess_123".to_string()));
+    }
+
+    #[test]
     fn test_parse_container_output_error() {
         let output = "some error output";
         let result = parse_container_output(output, false, 100);
@@ -326,5 +408,149 @@ mod tests {
         let output = result.unwrap();
         assert_eq!(output.status, "error");
         assert!(output.error.is_some());
+    }
+
+    #[test]
+    fn test_parse_container_output_marked() {
+        let output = "prefix\n--NANOCLAW_OUTPUT_START--\n{\"status\": \"success\", \"result\": \"marked\"}\n--NANOCLAW_OUTPUT_END--\nsuffix";
+        let result = parse_container_output(output, true, 100);
+        assert!(result.is_ok());
+        let parsed = result.unwrap();
+        assert_eq!(parsed.status, "success");
+        assert_eq!(parsed.result, Some("marked".to_string()));
+    }
+
+    #[test]
+    fn test_parse_container_output_empty() {
+        let output = "";
+        let result = parse_container_output(output, true, 100);
+        assert!(result.is_ok());
+        let parsed = result.unwrap();
+        assert_eq!(parsed.status, "success");
+        assert_eq!(parsed.result, Some("".to_string()));
+    }
+
+    #[test]
+    fn test_parse_marked_content_success() {
+        let content = r#"{"status": "success", "result": "test output"}"#;
+        let result = parse_marked_content(content, true);
+        assert!(result.is_ok());
+        let parsed = result.unwrap();
+        assert_eq!(parsed.status, "success");
+        assert_eq!(parsed.result, Some("test output".to_string()));
+    }
+
+    #[test]
+    fn test_parse_marked_content_invalid_json() {
+        let content = "not valid json";
+        let result = parse_marked_content(content, true);
+        assert!(result.is_ok());
+        let parsed = result.unwrap();
+        assert_eq!(parsed.status, "success");
+        assert_eq!(parsed.result, Some("not valid json".to_string()));
+    }
+
+    #[test]
+    fn test_get_container_command() {
+        // This test just verifies the function doesn't panic
+        let cmd = get_container_command();
+        assert!(!cmd.is_empty());
+        // On Linux it should be "docker", on macOS "container"
+        assert!(cmd == "docker" || cmd == "container");
+    }
+
+    #[test]
+    fn test_create_group_ipc_directory() {
+        let result = create_group_ipc_directory("test_group_123");
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.exists());
+        
+        // Cleanup
+        let _ = fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn test_prepare_group_context() {
+        let result = prepare_group_context("test_context_group");
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.exists());
+        
+        // Cleanup
+        let _ = fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn test_prepare_group_context_existing() {
+        // First call creates the directory
+        let path1 = prepare_group_context("existing_group").unwrap();
+        // Second call should succeed on existing directory
+        let path2 = prepare_group_context("existing_group").unwrap();
+        assert_eq!(path1, path2);
+        
+        // Cleanup
+        let _ = fs::remove_dir_all(&path1);
+    }
+
+    #[test]
+    fn test_write_ipc_files() {
+        let input = ContainerInput {
+            prompt: "test prompt".to_string(),
+            session_id: Some("test_session".to_string()),
+            group_folder: "test_ipc_group".to_string(),
+            chat_jid: "test@chat".to_string(),
+            is_main: true,
+            is_scheduled_task: false,
+        };
+        
+        let result = write_ipc_files("test_ipc_group", &input);
+        assert!(result.is_ok());
+        
+        // Verify files were created
+        let ipc_dir = create_group_ipc_directory("test_ipc_group").unwrap();
+        assert!(ipc_dir.join("current_tasks.json").exists());
+        assert!(ipc_dir.join("available_groups.json").exists());
+        
+        // Cleanup
+        let _ = fs::remove_dir_all(&ipc_dir);
+        let _ = fs::remove_dir_all(groups_dir().join("test_ipc_group"));
+    }
+
+    #[test]
+    fn test_log_container_output() {
+        let output = ContainerOutput {
+            status: "success".to_string(),
+            result: Some("test result".to_string()),
+            new_session_id: Some("sess_123".to_string()),
+            error: None,
+        };
+        
+        let result = log_container_output("test_log_group", "test_session", &output);
+        assert!(result.is_ok());
+        
+        // Verify log file was created
+        let log_dir = logs_dir().join("test_log_group");
+        assert!(log_dir.exists());
+        
+        // Cleanup
+        let _ = fs::remove_dir_all(&log_dir);
+    }
+
+    #[test]
+    fn test_log_container_output_error() {
+        let output = ContainerOutput {
+            status: "error".to_string(),
+            result: None,
+            new_session_id: None,
+            error: Some("test error".to_string()),
+        };
+        
+        let result = log_container_output("test_log_error_group", "test_session", &output);
+        assert!(result.is_ok());
+        
+        // Cleanup
+        let log_dir = logs_dir().join("test_log_error_group");
+        let _ = fs::remove_dir_all(&log_dir);
     }
 }

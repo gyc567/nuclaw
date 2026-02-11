@@ -454,9 +454,30 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_cron_expression_with_seconds() {
+        let result = parse_cron_expression("0 0 0 9 * * *");
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn test_parse_invalid_cron() {
         let result = parse_cron_expression("invalid cron");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_empty_cron() {
+        let result = parse_cron_expression("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_next_run_time() {
+        let schedule = parse_cron_expression("0 0 9 * * *").unwrap();
+        let next = get_next_run_time(&schedule);
+        let now = chrono::Utc::now();
+        // Next run should be in the future
+        assert!(next >= now);
     }
 
     #[test]
@@ -473,14 +494,162 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_interval_next_run_invalid() {
+        let scheduler = TaskScheduler::new(Database::new().unwrap());
+        let next = scheduler.calculate_next_interval_run("not_a_number".to_string());
+        assert!(next.is_none());
+    }
+
+    #[test]
+    fn test_calculate_interval_next_run_zero() {
+        let scheduler = TaskScheduler::new(Database::new().unwrap());
+        let next = scheduler.calculate_next_interval_run("0".to_string());
+        assert!(next.is_some());
+        // Should be essentially now
+        let next_time: DateTime<Utc> = DateTime::from_str(&next.unwrap()).unwrap();
+        let now = chrono::Utc::now();
+        let diff = next_time.signed_duration_since(now).num_seconds();
+        assert!(diff <= 1);
+    }
+
+    #[test]
+    fn test_calculate_next_cron_run() {
+        let scheduler = TaskScheduler::new(Database::new().unwrap());
+        let task = ScheduledTask {
+            id: "test".to_string(),
+            group_folder: "test".to_string(),
+            chat_jid: "test".to_string(),
+            prompt: "test".to_string(),
+            schedule_type: "cron".to_string(),
+            schedule_value: "0 0 9 * * *".to_string(),
+            next_run: None,
+            last_run: None,
+            last_result: None,
+            status: "active".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            context_mode: "isolated".to_string(),
+        };
+        let next = scheduler.calculate_next_run(&task);
+        assert!(next.is_some());
+    }
+
+    #[test]
+    fn test_calculate_next_run_once() {
+        let scheduler = TaskScheduler::new(Database::new().unwrap());
+        let task = ScheduledTask {
+            id: "test".to_string(),
+            group_folder: "test".to_string(),
+            chat_jid: "test".to_string(),
+            prompt: "test".to_string(),
+            schedule_type: "once".to_string(),
+            schedule_value: "2025-01-01T00:00:00Z".to_string(),
+            next_run: None,
+            last_run: None,
+            last_result: None,
+            status: "active".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            context_mode: "isolated".to_string(),
+        };
+        let next = scheduler.calculate_next_run(&task);
+        assert!(next.is_none());
+    }
+
+    #[test]
+    fn test_calculate_next_run_invalid_type() {
+        let scheduler = TaskScheduler::new(Database::new().unwrap());
+        let task = ScheduledTask {
+            id: "test".to_string(),
+            group_folder: "test".to_string(),
+            chat_jid: "test".to_string(),
+            prompt: "test".to_string(),
+            schedule_type: "unknown".to_string(),
+            schedule_value: "value".to_string(),
+            next_run: None,
+            last_run: None,
+            last_result: None,
+            status: "active".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            context_mode: "isolated".to_string(),
+        };
+        let next = scheduler.calculate_next_run(&task);
+        assert!(next.is_none());
+    }
+
+    #[test]
     fn test_poll_interval_default() {
         let interval = poll_interval();
         assert_eq!(interval, Duration::from_secs(DEFAULT_POLL_INTERVAL_SECS));
     }
 
     #[test]
+    fn test_poll_interval_from_env() {
+        // Save original
+        let original = std::env::var("SCHEDULER_POLL_INTERVAL").ok();
+        
+        std::env::set_var("SCHEDULER_POLL_INTERVAL", "120");
+        let interval = poll_interval();
+        assert_eq!(interval, Duration::from_secs(120));
+        
+        // Restore
+        match original {
+            Some(val) => std::env::set_var("SCHEDULER_POLL_INTERVAL", val),
+            None => std::env::remove_var("SCHEDULER_POLL_INTERVAL"),
+        }
+    }
+
+    #[test]
+    fn test_poll_interval_invalid_env() {
+        // Save original
+        let original = std::env::var("SCHEDULER_POLL_INTERVAL").ok();
+        
+        std::env::set_var("SCHEDULER_POLL_INTERVAL", "invalid");
+        let interval = poll_interval();
+        // Should fall back to default
+        assert_eq!(interval, Duration::from_secs(DEFAULT_POLL_INTERVAL_SECS));
+        
+        // Restore
+        match original {
+            Some(val) => std::env::set_var("SCHEDULER_POLL_INTERVAL", val),
+            None => std::env::remove_var("SCHEDULER_POLL_INTERVAL"),
+        }
+    }
+
+    #[test]
     fn test_task_timeout_default() {
         let timeout = task_timeout();
         assert_eq!(timeout, Duration::from_secs(DEFAULT_TASK_TIMEOUT_SECS));
+    }
+
+    #[test]
+    fn test_task_timeout_from_env() {
+        // Save original
+        let original = std::env::var("TASK_TIMEOUT").ok();
+        
+        std::env::set_var("TASK_TIMEOUT", "300");
+        let timeout = task_timeout();
+        assert_eq!(timeout, Duration::from_secs(300));
+        
+        // Restore
+        match original {
+            Some(val) => std::env::set_var("TASK_TIMEOUT", val),
+            None => std::env::remove_var("TASK_TIMEOUT"),
+        }
+    }
+
+    #[test]
+    fn test_task_scheduler_new() {
+        let db = Database::new().unwrap();
+        let scheduler = TaskScheduler::new(db);
+        // Just verify it was created
+        assert_eq!(scheduler.poll_interval, poll_interval());
+        assert_eq!(scheduler.task_timeout, task_timeout());
+    }
+
+    #[test]
+    fn test_scheduler_clone() {
+        let db = Database::new().unwrap();
+        let scheduler = TaskScheduler::new(db);
+        let _cloned = scheduler.clone();
+        // Clone should work without panic
     }
 }
