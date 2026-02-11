@@ -19,6 +19,9 @@ pub mod whatsapp;
 
 // Re-exports for convenience
 pub use config::ensure_directories;
-pub use container_runner::{run_container, ensure_container_system_running, container_timeout, max_output_size, create_group_ipc_directory};
+pub use container_runner::{
+    container_timeout, create_group_ipc_directory, ensure_container_system_running,
+    max_output_size, run_container,
+};
 pub use error::{NuClawError, Result};
 pub use task_scheduler::TaskScheduler;

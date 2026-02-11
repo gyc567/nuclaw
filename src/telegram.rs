@@ -119,9 +119,14 @@ impl TelegramClient {
 
         Ok(Self {
             api_url,
-            webhook_path: std::env::var("TELEGRAM_WEBHOOK_PATH").unwrap_or_else(|_| "telegram-webhook".to_string()),
-            dm_policy: DMPolicy::from_str(&std::env::var("TELEGRAM_DM_POLICY").unwrap_or_else(|_| "pairing".to_string())),
-            group_policy: GroupPolicy::from_str(&std::env::var("TELEGRAM_GROUP_POLICY").unwrap_or_else(|_| "allowlist".to_string())),
+            webhook_path: std::env::var("TELEGRAM_WEBHOOK_PATH")
+                .unwrap_or_else(|_| "telegram-webhook".to_string()),
+            dm_policy: DMPolicy::from_str(
+                &std::env::var("TELEGRAM_DM_POLICY").unwrap_or_else(|_| "pairing".to_string()),
+            ),
+            group_policy: GroupPolicy::from_str(
+                &std::env::var("TELEGRAM_GROUP_POLICY").unwrap_or_else(|_| "allowlist".to_string()),
+            ),
             text_chunk_limit: std::env::var("TELEGRAM_TEXT_CHUNK_LIMIT")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -168,7 +173,10 @@ impl TelegramClient {
 
         if response.status() != 200 {
             return Err(NuClawError::Telegram {
-                message: format!("Webhook setup failed: {}", response.text().await.unwrap_or_default()),
+                message: format!(
+                    "Webhook setup failed: {}",
+                    response.text().await.unwrap_or_default()
+                ),
             });
         }
 
@@ -188,22 +196,24 @@ impl TelegramClient {
         let webhook_path = client.lock().await.webhook_path.clone();
 
         let app = Router::new()
-            .route(
-                &format!("/{}", webhook_path),
-                post(handle_telegram_webhook),
-            )
+            .route(&format!("/{}", webhook_path), post(handle_telegram_webhook))
             .route("/health", get(health_check))
             .with_state(client.clone());
 
         info!("Starting Telegram webhook server on {}", addr);
 
-        let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| NuClawError::Telegram {
-            message: format!("Failed to bind to {}: {}", addr, e),
-        })?;
+        let listener =
+            tokio::net::TcpListener::bind(&addr)
+                .await
+                .map_err(|e| NuClawError::Telegram {
+                    message: format!("Failed to bind to {}: {}", addr, e),
+                })?;
 
-        axum::serve(listener, app).await.map_err(|e| NuClawError::Telegram {
-            message: format!("Webhook server error: {}", e),
-        })?;
+        axum::serve(listener, app)
+            .await
+            .map_err(|e| NuClawError::Telegram {
+                message: format!("Webhook server error: {}", e),
+            })?;
 
         Ok(())
     }
@@ -224,14 +234,22 @@ impl TelegramClient {
 
     /// Parse Telegram message to unified format
     async fn parse_telegram_message(&self, msg: &TelegramMessage) -> Result<NewMessage> {
-        let sender = msg.from.as_ref().map(|u| u.id.to_string()).unwrap_or_default();
-        let sender_name = msg.from.as_ref().map(|u| {
-            if let Some(username) = &u.username {
-                username.clone()
-            } else {
-                u.first_name.clone()
-            }
-        }).unwrap_or_else(|| "Unknown".to_string());
+        let sender = msg
+            .from
+            .as_ref()
+            .map(|u| u.id.to_string())
+            .unwrap_or_default();
+        let sender_name = msg
+            .from
+            .as_ref()
+            .map(|u| {
+                if let Some(username) = &u.username {
+                    username.clone()
+                } else {
+                    u.first_name.clone()
+                }
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
 
         let chat_jid = format!("telegram:group:{}", msg.chat.id);
 
@@ -276,12 +294,18 @@ impl TelegramClient {
             None => return Ok(None),
         };
 
-        info!("Received message from {}: {}", msg.sender_name, truncate(&content, 50));
+        info!(
+            "Received message from {}: {}",
+            msg.sender_name,
+            truncate(&content, 50)
+        );
 
-        let group_folder = self.get_group_folder(&msg.chat_jid).await
-            .ok_or_else(|| NuClawError::Telegram {
-                message: format!("Group not found: {}", msg.chat_jid),
-            })?;
+        let group_folder =
+            self.get_group_folder(&msg.chat_jid)
+                .await
+                .ok_or_else(|| NuClawError::Telegram {
+                    message: format!("Group not found: {}", msg.chat_jid),
+                })?;
 
         let session_id = format!("telegram_{}", msg.id);
         let input = ContainerInput {
@@ -306,12 +330,14 @@ impl TelegramClient {
             Ok(Err(e)) => {
                 error!("Container error: {}", e);
                 let chat_id = self.extract_chat_id(&msg.chat_jid)?;
-                self.send_message(&chat_id.to_string(), &format!("Error: {}", e)).await?;
+                self.send_message(&chat_id.to_string(), &format!("Error: {}", e))
+                    .await?;
             }
             Err(_) => {
                 error!("Container timeout");
                 let chat_id = self.extract_chat_id(&msg.chat_jid)?;
-                self.send_message(&chat_id.to_string(), "Sorry, the request timed out.").await?;
+                self.send_message(&chat_id.to_string(), "Sorry, the request timed out.")
+                    .await?;
             }
         }
 
@@ -404,7 +430,10 @@ impl TelegramClient {
             GroupPolicy::Allowlist => {
                 // Extract chat_id from jid
                 if let Some(chat_id) = chat_jid.strip_prefix("telegram:group:") {
-                    let result = self.allowed_groups.iter().any(|g| g == chat_id || g == &format!("-{}", chat_id));
+                    let result = self
+                        .allowed_groups
+                        .iter()
+                        .any(|g| g == chat_id || g == &format!("-{}", chat_id));
                     Ok(result)
                 } else {
                     Ok(false)
@@ -448,7 +477,9 @@ impl TelegramClient {
     /// Update router state after processing
     async fn update_router_state(&mut self, msg: &NewMessage) {
         self.router_state.last_timestamp = msg.timestamp.clone();
-        self.router_state.last_agent_timestamp.insert(msg.chat_jid.clone(), msg.timestamp.clone());
+        self.router_state
+            .last_agent_timestamp
+            .insert(msg.chat_jid.clone(), msg.timestamp.clone());
 
         let state_path = data_dir().join("router_state.json");
         let _ = save_json(&state_path, &self.router_state);
@@ -456,9 +487,12 @@ impl TelegramClient {
 
     /// Store message in database
     async fn store_message(&self, msg: &NewMessage) -> Result<()> {
-        let conn = self.db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
+        let conn = self
+            .db
+            .get_connection()
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         conn.execute(
             "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
@@ -514,10 +548,13 @@ async fn health_check() -> &'static str {
 /// Load router state from file
 pub fn load_router_state() -> RouterState {
     let state_path = data_dir().join("router_state.json");
-    load_json(&state_path, RouterState {
-        last_timestamp: String::new(),
-        last_agent_timestamp: HashMap::new(),
-    })
+    load_json(
+        &state_path,
+        RouterState {
+            last_timestamp: String::new(),
+            last_agent_timestamp: HashMap::new(),
+        },
+    )
 }
 
 /// Load registered groups from file
@@ -600,7 +637,9 @@ mod tests {
         let result = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(client.extract_trigger("@Andy hello world"))
-        }).join().unwrap();
+        })
+        .join()
+        .unwrap();
 
         assert!(result.is_some());
         let (trigger, content) = result.unwrap();
@@ -663,6 +702,10 @@ mod tests {
         // Create a text longer than 50 characters with multiple paragraphs
         let long_text = "This is paragraph one that is longer than fifty characters.\n\nThis is paragraph two that is also quite long and should create multiple chunks.\n\nThis is the third paragraph to ensure we have enough content.";
         let chunks = client.chunk_text(long_text);
-        assert!(chunks.len() > 1, "Expected multiple chunks but got {:?}", chunks);
+        assert!(
+            chunks.len() > 1,
+            "Expected multiple chunks but got {:?}",
+            chunks
+        );
     }
 }

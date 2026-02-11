@@ -11,9 +11,8 @@ pub struct Database {
 impl Clone for Database {
     fn clone(&self) -> Self {
         let db_path = store_dir().join("nuclaw.db");
-        let connection = Connection::open(&db_path).unwrap_or_else(|_| {
-            panic!("Failed to open database at {:?}", db_path)
-        });
+        let connection = Connection::open(&db_path)
+            .unwrap_or_else(|_| panic!("Failed to open database at {:?}", db_path));
         Database {
             connection: Mutex::new(connection),
         }

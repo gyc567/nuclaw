@@ -17,7 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Command as AsyncCommand, ChildStdout};
+use tokio::process::{ChildStdout, Command as AsyncCommand};
 use tokio::time::{timeout, Duration, Instant};
 
 /// Default container timeout: 5 minutes
@@ -76,9 +76,10 @@ fn write_ipc_files(group_folder: &str, input: &ContainerInput) -> Result<()> {
             "is_scheduled": input.is_scheduled_task
         }]
     });
-    let tasks_json = serde_json::to_string_pretty(&tasks_data).map_err(|e| NuClawError::FileSystem {
-        message: format!("Failed to serialize tasks: {}", e),
-    })?;
+    let tasks_json =
+        serde_json::to_string_pretty(&tasks_data).map_err(|e| NuClawError::FileSystem {
+            message: format!("Failed to serialize tasks: {}", e),
+        })?;
     fs::write(&tasks_path, tasks_json).map_err(|e| NuClawError::FileSystem {
         message: format!("Failed to write tasks file: {}", e),
     })?;
@@ -93,9 +94,10 @@ fn write_ipc_files(group_folder: &str, input: &ContainerInput) -> Result<()> {
             }
         }
     });
-    let groups_json = serde_json::to_string_pretty(&groups_data).map_err(|e| NuClawError::FileSystem {
-        message: format!("Failed to serialize groups: {}", e),
-    })?;
+    let groups_json =
+        serde_json::to_string_pretty(&groups_data).map_err(|e| NuClawError::FileSystem {
+            message: format!("Failed to serialize groups: {}", e),
+        })?;
     fs::write(&groups_path, groups_json).map_err(|e| NuClawError::FileSystem {
         message: format!("Failed to write groups file: {}", e),
     })?;
@@ -134,7 +136,13 @@ async fn build_container_command(
     fs::create_dir_all(&temp_dir).map_err(|e| NuClawError::FileSystem {
         message: format!("Failed to create temp directory: {}", e),
     })?;
-    let input_path = temp_dir.join(format!("input_{}.json", input.session_id.clone().unwrap_or_else(|| "default".to_string())));
+    let input_path = temp_dir.join(format!(
+        "input_{}.json",
+        input
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "default".to_string())
+    ));
     let input_json = serde_json::to_string(input).map_err(|e| NuClawError::Container {
         message: format!("Failed to serialize input: {}", e),
     })?;
@@ -143,16 +151,40 @@ async fn build_container_command(
     })?;
     let mut cmd = AsyncCommand::new(get_container_command());
     if cfg!(target_os = "macos") {
-        cmd.arg("exec").arg("--workspace").arg(group_dir).arg("--input").arg(&input_path).arg("--name").arg(assistant_name());
+        cmd.arg("exec")
+            .arg("--workspace")
+            .arg(group_dir)
+            .arg("--input")
+            .arg(&input_path)
+            .arg("--name")
+            .arg(assistant_name());
     } else {
-        let image = std::env::var("CONTAINER_IMAGE").unwrap_or_else(|_| "anthropic/claude-code:latest".to_string());
-        cmd.arg("run").arg("--rm").arg("-v").arg(format!("{}:/workspace/group", group_dir.display())).arg("-e").arg("CLAUDE_CODE_OAUTH_TOKEN").arg("-e").arg("ANTHROPIC_API_KEY").arg("--entrypoint").arg("/bin/sh").arg(image).arg("-c").arg("cat /workspace/input.json | /usr/local/bin/claude");
+        let image = std::env::var("CONTAINER_IMAGE")
+            .unwrap_or_else(|_| "anthropic/claude-code:latest".to_string());
+        cmd.arg("run")
+            .arg("--rm")
+            .arg("-v")
+            .arg(format!("{}:/workspace/group", group_dir.display()))
+            .arg("-e")
+            .arg("CLAUDE_CODE_OAUTH_TOKEN")
+            .arg("-e")
+            .arg("ANTHROPIC_API_KEY")
+            .arg("--entrypoint")
+            .arg("/bin/sh")
+            .arg(image)
+            .arg("-c")
+            .arg("cat /workspace/input.json | /usr/local/bin/claude");
     }
-    cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    cmd.stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     Ok((cmd, input_path))
 }
 
-async fn run_container_with_output(cmd: &mut AsyncCommand, timeout_duration: Duration) -> Result<ContainerOutput> {
+async fn run_container_with_output(
+    cmd: &mut AsyncCommand,
+    timeout_duration: Duration,
+) -> Result<ContainerOutput> {
     let mut child = cmd.spawn().map_err(|e| NuClawError::Container {
         message: format!("Failed to spawn container: {}", e),
     })?;
@@ -161,9 +193,12 @@ async fn run_container_with_output(cmd: &mut AsyncCommand, timeout_duration: Dur
         let input_path = data_dir().join("temp/input.json");
         if input_path.exists() {
             let input_content = fs::read_to_string(&input_path).unwrap_or_default();
-            stdin.write_all(input_content.as_bytes()).await.map_err(|e| NuClawError::Container {
-                message: format!("Failed to write to stdin: {}", e),
-            })?;
+            stdin
+                .write_all(input_content.as_bytes())
+                .await
+                .map_err(|e| NuClawError::Container {
+                    message: format!("Failed to write to stdin: {}", e),
+                })?;
         }
         stdin.shutdown().await.map_err(|e| NuClawError::Container {
             message: format!("Failed to close stdin: {}", e),
@@ -203,19 +238,36 @@ async fn capture_output(stdout: ChildStdout) -> Result<String> {
     Ok(output)
 }
 
-fn parse_container_output(output: &str, success: bool, _duration_ms: i64) -> Result<ContainerOutput> {
+fn parse_container_output(
+    output: &str,
+    success: bool,
+    _duration_ms: i64,
+) -> Result<ContainerOutput> {
     if let Some(content) = extract_marked_output(output) {
         return parse_marked_content(&content, success);
     }
-    let last_line = output.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+    let last_line = output
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
     if let Ok(parsed) = serde_json::from_str::<ContainerOutput>(last_line) {
         return Ok(parsed);
     }
     Ok(ContainerOutput {
-        status: if success { "success".to_string() } else { "error".to_string() },
+        status: if success {
+            "success".to_string()
+        } else {
+            "error".to_string()
+        },
         result: Some(output.to_string()),
         new_session_id: None,
-        error: if success { None } else { Some("Container execution failed".to_string()) },
+        error: if success {
+            None
+        } else {
+            Some("Container execution failed".to_string())
+        },
     })
 }
 
@@ -234,28 +286,46 @@ fn parse_marked_content(content: &str, success: bool) -> Result<ContainerOutput>
         return Ok(parsed);
     }
     Ok(ContainerOutput {
-        status: if success { "success".to_string() } else { "error".to_string() },
+        status: if success {
+            "success".to_string()
+        } else {
+            "error".to_string()
+        },
         result: Some(content.to_string()),
         new_session_id: None,
-        error: if success { None } else { Some("Container execution failed".to_string()) },
+        error: if success {
+            None
+        } else {
+            Some("Container execution failed".to_string())
+        },
     })
 }
 
 pub fn ensure_container_system_running() -> Result<()> {
-    let output = Command::new(get_container_command()).args(&["system", "status"]).output();
+    let output = Command::new(get_container_command())
+        .args(&["system", "status"])
+        .output();
     match output {
         Ok(_) => Ok(()),
         Err(_) => {
-            let output = Command::new(get_container_command()).args(&["system", "start"]).output();
+            let output = Command::new(get_container_command())
+                .args(&["system", "start"])
+                .output();
             match output {
                 Ok(_) => Ok(()),
-                Err(e) => Err(NuClawError::Container { message: format!("Failed to start container system: {}", e) }),
+                Err(e) => Err(NuClawError::Container {
+                    message: format!("Failed to start container system: {}", e),
+                }),
             }
         }
     }
 }
 
-pub fn log_container_output(group_folder: &str, session_id: &str, output: &ContainerOutput) -> Result<()> {
+pub fn log_container_output(
+    group_folder: &str,
+    session_id: &str,
+    output: &ContainerOutput,
+) -> Result<()> {
     let log_dir = logs_dir().join(group_folder);
     fs::create_dir_all(&log_dir).map_err(|e| NuClawError::FileSystem {
         message: format!("Failed to create log directory: {}", e),
@@ -271,7 +341,11 @@ pub fn log_container_output(group_folder: &str, session_id: &str, output: &Conta
         "error": output.error,
         "new_session_id": output.new_session_id,
     });
-    fs::write(&log_path, serde_json::to_string_pretty(&log_data).unwrap_or_default()).map_err(|e| NuClawError::FileSystem {
+    fs::write(
+        &log_path,
+        serde_json::to_string_pretty(&log_data).unwrap_or_default(),
+    )
+    .map_err(|e| NuClawError::FileSystem {
         message: format!("Failed to write log file: {}", e),
     })?;
     Ok(())
@@ -286,7 +360,10 @@ mod tests {
         let output = "Some prefix\n--NANOCLAW_OUTPUT_START--\n{\"status\": \"success\", \"result\": \"test\"}\n--NANOCLAW_OUTPUT_END--\nSome suffix";
         let extracted = extract_marked_output(output);
         assert!(extracted.is_some());
-        assert_eq!(extracted.unwrap(), "\n{\"status\": \"success\", \"result\": \"test\"}\n");
+        assert_eq!(
+            extracted.unwrap(),
+            "\n{\"status\": \"success\", \"result\": \"test\"}\n"
+        );
     }
 
     #[test]
@@ -329,11 +406,11 @@ mod tests {
     fn test_container_timeout_from_env() {
         // Save original value
         let original = std::env::var("CONTAINER_TIMEOUT").ok();
-        
+
         std::env::set_var("CONTAINER_TIMEOUT", "60000");
         let timeout = container_timeout();
         assert_eq!(timeout, Duration::from_millis(60000));
-        
+
         // Restore original value
         match original {
             Some(val) => std::env::set_var("CONTAINER_TIMEOUT", val),
@@ -345,12 +422,12 @@ mod tests {
     fn test_container_timeout_invalid_env() {
         // Save original value
         let original = std::env::var("CONTAINER_TIMEOUT").ok();
-        
+
         std::env::set_var("CONTAINER_TIMEOUT", "invalid");
         let timeout = container_timeout();
         // Should fall back to default
         assert_eq!(timeout, Duration::from_millis(DEFAULT_TIMEOUT_MS));
-        
+
         // Restore original value
         match original {
             Some(val) => std::env::set_var("CONTAINER_TIMEOUT", val),
@@ -368,11 +445,11 @@ mod tests {
     fn test_max_output_size_from_env() {
         // Save original value
         let original = std::env::var("CONTAINER_MAX_OUTPUT_SIZE").ok();
-        
+
         std::env::set_var("CONTAINER_MAX_OUTPUT_SIZE", "5242880");
         let max_size = max_output_size();
         assert_eq!(max_size, 5 * 1024 * 1024);
-        
+
         // Restore original value
         match original {
             Some(val) => std::env::set_var("CONTAINER_MAX_OUTPUT_SIZE", val),
@@ -465,7 +542,7 @@ mod tests {
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(path.exists());
-        
+
         // Cleanup
         let _ = fs::remove_dir_all(&path);
     }
@@ -476,7 +553,7 @@ mod tests {
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(path.exists());
-        
+
         // Cleanup
         let _ = fs::remove_dir_all(&path);
     }
@@ -488,7 +565,7 @@ mod tests {
         // Second call should succeed on existing directory
         let path2 = prepare_group_context("existing_group").unwrap();
         assert_eq!(path1, path2);
-        
+
         // Cleanup
         let _ = fs::remove_dir_all(&path1);
     }
@@ -503,15 +580,15 @@ mod tests {
             is_main: true,
             is_scheduled_task: false,
         };
-        
+
         let result = write_ipc_files("test_ipc_group", &input);
         assert!(result.is_ok());
-        
+
         // Verify files were created
         let ipc_dir = create_group_ipc_directory("test_ipc_group").unwrap();
         assert!(ipc_dir.join("current_tasks.json").exists());
         assert!(ipc_dir.join("available_groups.json").exists());
-        
+
         // Cleanup
         let _ = fs::remove_dir_all(&ipc_dir);
         let _ = fs::remove_dir_all(groups_dir().join("test_ipc_group"));
@@ -525,14 +602,14 @@ mod tests {
             new_session_id: Some("sess_123".to_string()),
             error: None,
         };
-        
+
         let result = log_container_output("test_log_group", "test_session", &output);
         assert!(result.is_ok());
-        
+
         // Verify log file was created
         let log_dir = logs_dir().join("test_log_group");
         assert!(log_dir.exists());
-        
+
         // Cleanup
         let _ = fs::remove_dir_all(&log_dir);
     }
@@ -545,10 +622,10 @@ mod tests {
             new_session_id: None,
             error: Some("test error".to_string()),
         };
-        
+
         let result = log_container_output("test_log_error_group", "test_session", &output);
         assert!(result.is_ok());
-        
+
         // Cleanup
         let log_dir = logs_dir().join("test_log_error_group");
         let _ = fs::remove_dir_all(&log_dir);

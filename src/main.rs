@@ -50,12 +50,12 @@ async fn main() -> Result<()> {
 
     // Ensure directories exist
     config::ensure_directories().map_err(|e| NuClawError::FileSystem {
-        message: e.to_string()
+        message: e.to_string(),
     })?;
 
     // Initialize database
     let db = db::Database::new().map_err(|e| NuClawError::Database {
-        message: e.to_string()
+        message: e.to_string(),
     })?;
     info!("Database initialized successfully");
 

@@ -12,7 +12,7 @@
 //! - Graceful shutdown
 
 use crate::config::timezone;
-use crate::container_runner::{run_container, log_container_output};
+use crate::container_runner::{log_container_output, run_container};
 use crate::db::Database;
 use crate::error::{NuClawError, Result};
 use crate::types::{ContainerInput, ContainerOutput, ScheduledTask};
@@ -72,7 +72,10 @@ impl TaskScheduler {
         let mut interval = interval(self.poll_interval);
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        tracing::info!("Task scheduler started with poll interval: {:?}", self.poll_interval);
+        tracing::info!(
+            "Task scheduler started with poll interval: {:?}",
+            self.poll_interval
+        );
 
         loop {
             tokio::select! {
@@ -146,10 +149,12 @@ impl TaskScheduler {
         let start_time = chrono::Utc::now();
 
         // Verify task is still active (may have been paused/cancelled)
-        let current_task = self.load_task(&task.id).await?
-            .ok_or_else(|| NuClawError::Scheduler {
-                message: format!("Task {} not found", task.id),
-            })?;
+        let current_task =
+            self.load_task(&task.id)
+                .await?
+                .ok_or_else(|| NuClawError::Scheduler {
+                    message: format!("Task {} not found", task.id),
+                })?;
 
         if current_task.status != "active" {
             tracing::info!("Task {} is no longer active, skipping", task.id);
@@ -168,10 +173,7 @@ impl TaskScheduler {
         };
 
         // Execute container with timeout
-        let result = tokio::time::timeout(
-            self.task_timeout,
-            run_container(input),
-        ).await;
+        let result = tokio::time::timeout(self.task_timeout, run_container(input)).await;
 
         let end_time = chrono::Utc::now();
         let duration_ms = (end_time - start_time).num_milliseconds() as i64;
@@ -180,7 +182,8 @@ impl TaskScheduler {
         match result {
             Ok(Ok(output)) => {
                 // Log successful execution
-                self.log_task_run(task, &output, duration_ms, "success").await?;
+                self.log_task_run(task, &output, duration_ms, "success")
+                    .await?;
 
                 // Log to file
                 let _ = log_container_output(&task.group_folder, &session_id, &output);
@@ -204,7 +207,8 @@ impl TaskScheduler {
                     new_session_id: None,
                     error: Some(e.to_string()),
                 };
-                self.log_task_run(task, &output, duration_ms, "error").await?;
+                self.log_task_run(task, &output, duration_ms, "error")
+                    .await?;
                 self.mark_task_failed(&task.id).await?;
             }
             Err(_) => {
@@ -215,7 +219,8 @@ impl TaskScheduler {
                     new_session_id: None,
                     error: Some("Task execution timed out".to_string()),
                 };
-                self.log_task_run(task, &output, duration_ms, "timeout").await?;
+                self.log_task_run(task, &output, duration_ms, "timeout")
+                    .await?;
                 self.mark_task_failed(&task.id).await?;
             }
         }
@@ -258,37 +263,44 @@ impl TaskScheduler {
 
     /// Load tasks that are due for execution
     async fn load_due_tasks(&self, now: &str) -> Result<Vec<ScheduledTask>> {
-        let conn = self.db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
+        let conn = self
+            .db
+            .get_connection()
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
-        let mut stmt = conn.prepare(
-            "SELECT id, group_folder, chat_jid, prompt, schedule_type, schedule_value,
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, group_folder, chat_jid, prompt, schedule_type, schedule_value,
                     next_run, last_run, last_result, status, created_at, context_mode
              FROM scheduled_tasks
              WHERE status = 'active'
                AND (next_run IS NULL OR next_run <= ?)
-             ORDER BY next_run ASC"
-        ).map_err(|e| NuClawError::Database {
-            message: format!("Failed to prepare statement: {}", e),
-        })?;
+             ORDER BY next_run ASC",
+            )
+            .map_err(|e| NuClawError::Database {
+                message: format!("Failed to prepare statement: {}", e),
+            })?;
 
-        let tasks: rusqlite::Result<Vec<ScheduledTask>> = stmt.query_map([now], |row| {
-            Ok(ScheduledTask {
-                id: row.get(0)?,
-                group_folder: row.get(1)?,
-                chat_jid: row.get(2)?,
-                prompt: row.get(3)?,
-                schedule_type: row.get(4)?,
-                schedule_value: row.get(5)?,
-                next_run: row.get(6)?,
-                last_run: row.get(7)?,
-                last_result: row.get(8)?,
-                status: row.get(9)?,
-                created_at: row.get(10)?,
-                context_mode: row.get(11)?,
-            })
-        })?.collect();
+        let tasks: rusqlite::Result<Vec<ScheduledTask>> = stmt
+            .query_map([now], |row| {
+                Ok(ScheduledTask {
+                    id: row.get(0)?,
+                    group_folder: row.get(1)?,
+                    chat_jid: row.get(2)?,
+                    prompt: row.get(3)?,
+                    schedule_type: row.get(4)?,
+                    schedule_value: row.get(5)?,
+                    next_run: row.get(6)?,
+                    last_run: row.get(7)?,
+                    last_result: row.get(8)?,
+                    status: row.get(9)?,
+                    created_at: row.get(10)?,
+                    context_mode: row.get(11)?,
+                })
+            })?
+            .collect();
 
         tasks.map_err(|e| NuClawError::Database {
             message: format!("Failed to load tasks: {}", e),
@@ -297,17 +309,22 @@ impl TaskScheduler {
 
     /// Load a single task by ID
     async fn load_task(&self, task_id: &str) -> Result<Option<ScheduledTask>> {
-        let conn = self.db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
+        let conn = self
+            .db
+            .get_connection()
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
-        let mut stmt = conn.prepare(
-            "SELECT id, group_folder, chat_jid, prompt, schedule_type, schedule_value,
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, group_folder, chat_jid, prompt, schedule_type, schedule_value,
                     next_run, last_run, last_result, status, created_at, context_mode
-             FROM scheduled_tasks WHERE id = ?"
-        ).map_err(|e| NuClawError::Database {
-            message: format!("Failed to prepare statement: {}", e),
-        })?;
+             FROM scheduled_tasks WHERE id = ?",
+            )
+            .map_err(|e| NuClawError::Database {
+                message: format!("Failed to prepare statement: {}", e),
+            })?;
 
         stmt.query_row([task_id], |row| {
             Ok(ScheduledTask {
@@ -324,7 +341,9 @@ impl TaskScheduler {
                 created_at: row.get(10)?,
                 context_mode: row.get(11)?,
             })
-        }).map(Some).or_else(|e| {
+        })
+        .map(Some)
+        .or_else(|e| {
             if e == rusqlite::Error::QueryReturnedNoRows {
                 Ok(None)
             } else {
@@ -343,9 +362,12 @@ impl TaskScheduler {
         duration_ms: i64,
         run_status: &str,
     ) -> Result<()> {
-        let conn = self.db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
+        let conn = self
+            .db
+            .get_connection()
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -360,7 +382,8 @@ impl TaskScheduler {
                 output.result.clone().unwrap_or_default(),
                 output.error.clone().unwrap_or_default(),
             ],
-        ).map_err(|e| NuClawError::Database {
+        )
+        .map_err(|e| NuClawError::Database {
             message: format!("Failed to log task run: {}", e),
         })?;
 
@@ -374,7 +397,8 @@ impl TaskScheduler {
         conn.execute(
             "UPDATE scheduled_tasks SET last_run = ?, last_result = ? WHERE id = ?",
             rusqlite::params![now, last_result, task.id],
-        ).map_err(|e| NuClawError::Database {
+        )
+        .map_err(|e| NuClawError::Database {
             message: format!("Failed to update task: {}", e),
         })?;
 
@@ -383,14 +407,18 @@ impl TaskScheduler {
 
     /// Update next run time for a task
     async fn update_next_run(&self, task_id: &str, next_run: &str) -> Result<()> {
-        let conn = self.db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
+        let conn = self
+            .db
+            .get_connection()
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         conn.execute(
             "UPDATE scheduled_tasks SET next_run = ? WHERE id = ?",
             [next_run, task_id],
-        ).map_err(|e| NuClawError::Database {
+        )
+        .map_err(|e| NuClawError::Database {
             message: format!("Failed to update next run: {}", e),
         })?;
 
@@ -399,14 +427,18 @@ impl TaskScheduler {
 
     /// Mark a task as completed (for once-type tasks)
     async fn mark_task_completed(&self, task_id: &str) -> Result<()> {
-        let conn = self.db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
+        let conn = self
+            .db
+            .get_connection()
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         conn.execute(
             "UPDATE scheduled_tasks SET status = 'completed', next_run = NULL WHERE id = ?",
             [task_id],
-        ).map_err(|e| NuClawError::Database {
+        )
+        .map_err(|e| NuClawError::Database {
             message: format!("Failed to mark task completed: {}", e),
         })?;
 
@@ -415,14 +447,18 @@ impl TaskScheduler {
 
     /// Mark a task as failed
     async fn mark_task_failed(&self, task_id: &str) -> Result<()> {
-        let conn = self.db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
+        let conn = self
+            .db
+            .get_connection()
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         conn.execute(
             "UPDATE scheduled_tasks SET status = 'failed' WHERE id = ?",
             [task_id],
-        ).map_err(|e| NuClawError::Database {
+        )
+        .map_err(|e| NuClawError::Database {
             message: format!("Failed to mark task failed: {}", e),
         })?;
 
@@ -439,7 +475,10 @@ pub fn parse_cron_expression(expr: &str) -> Result<Schedule> {
 
 /// Get next run time from schedule
 pub fn get_next_run_time(schedule: &Schedule) -> DateTime<Utc> {
-    schedule.after(&chrono::Utc::now()).next().unwrap_or_else(|| chrono::Utc::now())
+    schedule
+        .after(&chrono::Utc::now())
+        .next()
+        .unwrap_or_else(|| chrono::Utc::now())
 }
 
 #[cfg(test)]
@@ -585,11 +624,11 @@ mod tests {
     fn test_poll_interval_from_env() {
         // Save original
         let original = std::env::var("SCHEDULER_POLL_INTERVAL").ok();
-        
+
         std::env::set_var("SCHEDULER_POLL_INTERVAL", "120");
         let interval = poll_interval();
         assert_eq!(interval, Duration::from_secs(120));
-        
+
         // Restore
         match original {
             Some(val) => std::env::set_var("SCHEDULER_POLL_INTERVAL", val),
@@ -601,12 +640,12 @@ mod tests {
     fn test_poll_interval_invalid_env() {
         // Save original
         let original = std::env::var("SCHEDULER_POLL_INTERVAL").ok();
-        
+
         std::env::set_var("SCHEDULER_POLL_INTERVAL", "invalid");
         let interval = poll_interval();
         // Should fall back to default
         assert_eq!(interval, Duration::from_secs(DEFAULT_POLL_INTERVAL_SECS));
-        
+
         // Restore
         match original {
             Some(val) => std::env::set_var("SCHEDULER_POLL_INTERVAL", val),
@@ -624,11 +663,11 @@ mod tests {
     fn test_task_timeout_from_env() {
         // Save original
         let original = std::env::var("TASK_TIMEOUT").ok();
-        
+
         std::env::set_var("TASK_TIMEOUT", "300");
         let timeout = task_timeout();
         assert_eq!(timeout, Duration::from_secs(300));
-        
+
         // Restore
         match original {
             Some(val) => std::env::set_var("TASK_TIMEOUT", val),

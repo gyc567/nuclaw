@@ -67,7 +67,9 @@ impl WhatsAppClient {
         // If creds file exists and is valid, no auth needed
         if creds_path.exists() {
             if let Ok(metadata) = std::fs::metadata(&creds_path) {
-                let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let modified = metadata
+                    .modified()
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 let duration = modified.elapsed().unwrap_or(std::time::Duration::ZERO);
                 if duration.as_secs() < 24 * 60 * 60 {
                     return Ok(false);
@@ -92,9 +94,10 @@ impl WhatsAppClient {
             })?;
 
         if response.status() == 200 {
-            let qr_data: serde_json::Value = response.json().await.map_err(|e| NuClawError::WhatsApp {
-                message: format!("Failed to parse QR response: {}", e),
-            })?;
+            let qr_data: serde_json::Value =
+                response.json().await.map_err(|e| NuClawError::WhatsApp {
+                    message: format!("Failed to parse QR response: {}", e),
+                })?;
 
             if let Some(qr) = qr_data.get("qr").and_then(|v| v.as_str()) {
                 self.last_qr = Some(qr.to_string());
@@ -108,7 +111,8 @@ impl WhatsAppClient {
 
     /// Start listening for messages
     pub async fn start_message_listener(&mut self) {
-        let mut interval = tokio::time::interval(Duration::from_millis(DEFAULT_WHATSAPP_POLL_INTERVAL_MS));
+        let mut interval =
+            tokio::time::interval(Duration::from_millis(DEFAULT_WHATSAPP_POLL_INTERVAL_MS));
 
         info!("Starting message listener...");
 
@@ -135,9 +139,10 @@ impl WhatsAppClient {
             })?;
 
         if response.status() == 200 {
-            let messages: Vec<NewMessage> = response.json().await.map_err(|e| NuClawError::WhatsApp {
-                message: format!("Failed to parse messages: {}", e),
-            })?;
+            let messages: Vec<NewMessage> =
+                response.json().await.map_err(|e| NuClawError::WhatsApp {
+                    message: format!("Failed to parse messages: {}", e),
+                })?;
 
             for msg in messages {
                 self.handle_message(&msg).await?;
@@ -167,12 +172,18 @@ impl WhatsAppClient {
             None => return Ok(None),
         };
 
-        info!("Received message from {}: {}", msg.sender, truncate(&content, 50));
+        info!(
+            "Received message from {}: {}",
+            msg.sender,
+            truncate(&content, 50)
+        );
 
-        let group_folder = self.get_group_folder(&msg.chat_jid).await
-            .ok_or_else(|| NuClawError::WhatsApp {
-                message: format!("Group not found: {}", msg.chat_jid),
-            })?;
+        let group_folder =
+            self.get_group_folder(&msg.chat_jid)
+                .await
+                .ok_or_else(|| NuClawError::WhatsApp {
+                    message: format!("Group not found: {}", msg.chat_jid),
+                })?;
 
         let session_id = format!("whatsapp_{}", msg.id);
         let input = ContainerInput {
@@ -195,11 +206,13 @@ impl WhatsAppClient {
             }
             Ok(Err(e)) => {
                 error!("Container error: {}", e);
-                self.send_message(&msg.chat_jid, &format!("Error: {}", e)).await?;
+                self.send_message(&msg.chat_jid, &format!("Error: {}", e))
+                    .await?;
             }
             Err(_) => {
                 error!("Container timeout");
-                self.send_message(&msg.chat_jid, "Sorry, the request timed out.").await?;
+                self.send_message(&msg.chat_jid, "Sorry, the request timed out.")
+                    .await?;
             }
         }
 
@@ -255,7 +268,9 @@ impl WhatsAppClient {
     /// Update router state after processing
     async fn update_router_state(&mut self, msg: &NewMessage) {
         self.router_state.last_timestamp = msg.timestamp.clone();
-        self.router_state.last_agent_timestamp.insert(msg.chat_jid.clone(), msg.timestamp.clone());
+        self.router_state
+            .last_agent_timestamp
+            .insert(msg.chat_jid.clone(), msg.timestamp.clone());
 
         let state_path = data_dir().join("router_state.json");
         let _ = save_json(&state_path, &self.router_state);
@@ -263,9 +278,12 @@ impl WhatsAppClient {
 
     /// Store message in database
     async fn store_message(&self, msg: &NewMessage) -> Result<()> {
-        let conn = self.db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
+        let conn = self
+            .db
+            .get_connection()
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         conn.execute(
             "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
@@ -322,10 +340,13 @@ fn get_mcp_url() -> Result<String> {
 /// Load router state from file
 pub fn load_router_state() -> RouterState {
     let state_path = data_dir().join("router_state.json");
-    load_json(&state_path, RouterState {
-        last_timestamp: String::new(),
-        last_agent_timestamp: HashMap::new(),
-    })
+    load_json(
+        &state_path,
+        RouterState {
+            last_timestamp: String::new(),
+            last_agent_timestamp: HashMap::new(),
+        },
+    )
 }
 
 /// Load registered groups from file
@@ -375,9 +396,9 @@ mod tests {
             assistant_name: "Andy".to_string(),
         };
 
-        let result = tokio::runtime::Runtime::new().unwrap().block_on(
-            client.extract_trigger("@Andy hello world")
-        );
+        let result = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(client.extract_trigger("@Andy hello world"));
 
         assert!(result.is_some());
         let (trigger, content) = result.unwrap();
@@ -396,9 +417,9 @@ mod tests {
             assistant_name: "Andy".to_string(),
         };
 
-        let result = tokio::runtime::Runtime::new().unwrap().block_on(
-            client.extract_trigger("hello world")
-        );
+        let result = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(client.extract_trigger("hello world"));
 
         assert!(result.is_none());
     }

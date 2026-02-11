@@ -25,7 +25,9 @@ pub fn logs_dir() -> PathBuf {
 
 pub fn mount_allowlist_path() -> PathBuf {
     let home = home::home_dir().unwrap_or_else(|| PathBuf::from("/Users/user"));
-    home.join(".config").join("nuclaw").join("mount-allowlist.json")
+    home.join(".config")
+        .join("nuclaw")
+        .join("mount-allowlist.json")
 }
 
 pub fn assistant_name() -> String {
@@ -37,7 +39,12 @@ pub fn timezone() -> String {
 }
 
 pub fn ensure_directories() -> std::io::Result<()> {
-    let dirs = [store_dir(), groups_dir(), data_dir(), mount_allowlist_path().parent().unwrap().to_path_buf()];
+    let dirs = [
+        store_dir(),
+        groups_dir(),
+        data_dir(),
+        mount_allowlist_path().parent().unwrap().to_path_buf(),
+    ];
     for dir in dirs {
         if !dir.exists() {
             std::fs::create_dir_all(&dir)?;
