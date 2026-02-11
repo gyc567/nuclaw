@@ -11,6 +11,7 @@ use nuclaw::config;
 use nuclaw::container_runner::{self, ensure_container_system_running};
 use nuclaw::db;
 use nuclaw::error::{NuClawError, Result};
+use nuclaw::logging;
 use nuclaw::task_scheduler::TaskScheduler;
 use nuclaw::telegram;
 use nuclaw::whatsapp;
@@ -18,7 +19,6 @@ use nuclaw::whatsapp;
 use structopt::StructOpt;
 use tokio::signal;
 use tracing::info;
-use tracing_subscriber::FmtSubscriber;
 
 #[derive(StructOpt, Debug)]
 struct Args {
@@ -39,11 +39,8 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::from_args();
 
-    // Setup logging
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::INFO)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    // Initialize logging
+    logging::init();
 
     info!("Starting NuClaw v1.0.0");
     info!("This is a Rust port of NanoClaw");

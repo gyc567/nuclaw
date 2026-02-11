@@ -2,7 +2,7 @@
 //!
 //! Provides WhatsApp connectivity via external WhatsApp MCP Server or HTTP API.
 
-use crate::config::{assistant_name, data_dir, groups_dir, store_dir};
+use crate::config::{assistant_name, data_dir, store_dir};
 use crate::container_runner::run_container;
 use crate::db::Database;
 use crate::error::{NuClawError, Result};

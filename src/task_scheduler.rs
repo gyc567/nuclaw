@@ -176,7 +176,7 @@ impl TaskScheduler {
         let result = tokio::time::timeout(self.task_timeout, run_container(input)).await;
 
         let end_time = chrono::Utc::now();
-        let duration_ms = (end_time - start_time).num_milliseconds() as i64;
+        let duration_ms = (end_time - start_time).num_milliseconds();
 
         // Process result and log
         match result {
@@ -478,7 +478,7 @@ pub fn get_next_run_time(schedule: &Schedule) -> DateTime<Utc> {
     schedule
         .after(&chrono::Utc::now())
         .next()
-        .unwrap_or_else(|| chrono::Utc::now())
+        .unwrap_or_else(chrono::Utc::now)
 }
 
 #[cfg(test)]

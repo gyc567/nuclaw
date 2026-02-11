@@ -20,16 +20,23 @@ tokio = { version = "1.40", features = ["full"] }
 # SQLite database - using rusqlite for simpler offline compilation
 rusqlite = { version = "0.32", features = ["bundled", "serde_json", "chrono"] }
 
-# Cron parsing
-cron = "0.12"
+# Connection pool for SQLite
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+env_logger = "0.11"
+tracing-log = "0.2"
+log = "0.4"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Cron parsing
+cron = "0.12"
 
 # QR code generation
 qrcode = "0.13"
@@ -78,3 +85,9 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+[profile.dev]
+clippy = "warn"
+
+[profile.release.clippy]
+warn = true

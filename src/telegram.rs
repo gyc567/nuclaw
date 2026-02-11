@@ -163,7 +163,7 @@ impl TelegramClient {
     async fn set_webhook(&self, url: &str) -> Result<()> {
         let full_url = format!("{}/webhook/{}", url, self.webhook_path);
         let response = reqwest::Client::new()
-            .post(&format!("{}/setWebhook", self.api_url))
+            .post(format!("{}/setWebhook", self.api_url))
             .json(&serde_json::json!({ "url": full_url }))
             .send()
             .await

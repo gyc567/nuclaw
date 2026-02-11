@@ -303,13 +303,13 @@ fn parse_marked_content(content: &str, success: bool) -> Result<ContainerOutput>
 
 pub fn ensure_container_system_running() -> Result<()> {
     let output = Command::new(get_container_command())
-        .args(&["system", "status"])
+        .args(["system", "status"])
         .output();
     match output {
         Ok(_) => Ok(()),
         Err(_) => {
             let output = Command::new(get_container_command())
-                .args(&["system", "start"])
+                .args(["system", "start"])
                 .output();
             match output {
                 Ok(_) => Ok(()),

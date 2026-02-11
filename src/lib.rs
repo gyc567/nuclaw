@@ -11,6 +11,7 @@ pub mod config;
 pub mod container_runner;
 pub mod db;
 pub mod error;
+pub mod logging;
 pub mod task_scheduler;
 pub mod telegram;
 pub mod types;
