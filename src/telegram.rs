@@ -818,9 +818,16 @@ mod tests {
         };
 
         let mut agent_ts = std::collections::HashMap::new();
-        agent_ts.insert("telegram:group:123".to_string(), "2025-01-01T00:00:00Z".to_string());
+        agent_ts.insert(
+            "telegram:group:123".to_string(),
+            "2025-01-01T00:00:00Z".to_string(),
+        );
 
-        assert!(is_duplicate_message_pure(&msg, "2025-01-01T00:00:00Z", &HashMap::new()));
+        assert!(is_duplicate_message_pure(
+            &msg,
+            "2025-01-01T00:00:00Z",
+            &HashMap::new()
+        ));
         assert!(is_duplicate_message_pure(&msg, "old", &agent_ts));
         assert!(!is_duplicate_message_pure(&msg, "old", &HashMap::new()));
     }
@@ -839,8 +846,16 @@ mod tests {
             GroupPolicy::Disabled,
             &[]
         ));
-        assert!(is_allowed_group_pure("telegram:group:123", GroupPolicy::Allowlist, &allowed));
-        assert!(is_allowed_group_pure("telegram:group:456", GroupPolicy::Allowlist, &allowed));
+        assert!(is_allowed_group_pure(
+            "telegram:group:123",
+            GroupPolicy::Allowlist,
+            &allowed
+        ));
+        assert!(is_allowed_group_pure(
+            "telegram:group:456",
+            GroupPolicy::Allowlist,
+            &allowed
+        ));
         assert!(!is_allowed_group_pure(
             "telegram:group:789",
             GroupPolicy::Allowlist,

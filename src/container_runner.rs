@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn test_container_timeout_from_env() {
         std::env::remove_var("CONTAINER_TIMEOUT");
-        
+
         let original = std::env::var("CONTAINER_TIMEOUT").ok();
         assert!(original.is_none());
 
@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn test_container_timeout_invalid_env() {
         std::env::remove_var("CONTAINER_TIMEOUT");
-        
+
         let original = std::env::var("CONTAINER_TIMEOUT").ok();
         assert!(original.is_none());
 
@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn test_max_output_size_from_env() {
         std::env::remove_var("CONTAINER_MAX_OUTPUT_SIZE");
-        
+
         let original = std::env::var("CONTAINER_MAX_OUTPUT_SIZE").ok();
         assert!(original.is_none());
 

@@ -509,9 +509,16 @@ mod tests {
         };
 
         let mut agent_ts = std::collections::HashMap::new();
-        agent_ts.insert("123@s.whatsapp.net".to_string(), "2025-01-01T00:00:00Z".to_string());
+        agent_ts.insert(
+            "123@s.whatsapp.net".to_string(),
+            "2025-01-01T00:00:00Z".to_string(),
+        );
 
-        assert!(is_duplicate_message_pure(&msg, "2025-01-01T00:00:00Z", &HashMap::new()));
+        assert!(is_duplicate_message_pure(
+            &msg,
+            "2025-01-01T00:00:00Z",
+            &HashMap::new()
+        ));
         assert!(is_duplicate_message_pure(&msg, "old", &agent_ts));
         assert!(!is_duplicate_message_pure(&msg, "old", &HashMap::new()));
     }
@@ -525,8 +532,14 @@ mod tests {
 
     #[test]
     fn test_get_group_name_from_jid() {
-        assert_eq!(get_group_name_from_jid("123@s.whatsapp.net"), Some("123".to_string()));
-        assert_eq!(get_group_name_from_jid("mygroup@g.us"), Some("mygroup".to_string()));
+        assert_eq!(
+            get_group_name_from_jid("123@s.whatsapp.net"),
+            Some("123".to_string())
+        );
+        assert_eq!(
+            get_group_name_from_jid("mygroup@g.us"),
+            Some("mygroup".to_string())
+        );
         assert_eq!(get_group_name_from_jid(""), Some("".to_string()));
     }
 
