@@ -183,6 +183,9 @@ fn initialize_schema(conn: &Connection) -> Result<(), NuClawError> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_db_path() -> PathBuf {
         store_dir().join("test_nuclaw.db")
@@ -289,26 +292,22 @@ mod tests {
 
     #[test]
     fn test_database_config_defaults() {
+        let _lock = ENV_LOCK.lock().unwrap();
+
         std::env::remove_var("DB_POOL_SIZE");
         std::env::remove_var("DB_CONNECTION_TIMEOUT_MS");
 
         let config = DatabaseConfig::default();
         assert_eq!(config.pool_size, 10);
         assert_eq!(config.connection_timeout_ms, 30000);
-
-        std::env::remove_var("DB_POOL_SIZE");
-        std::env::remove_var("DB_CONNECTION_TIMEOUT_MS");
     }
 
     #[test]
     fn test_database_config_from_env() {
+        let _lock = ENV_LOCK.lock().unwrap();
+
         std::env::remove_var("DB_POOL_SIZE");
         std::env::remove_var("DB_CONNECTION_TIMEOUT_MS");
-
-        let original_pool = std::env::var("DB_POOL_SIZE").ok();
-        let original_timeout = std::env::var("DB_CONNECTION_TIMEOUT_MS").ok();
-        assert!(original_pool.is_none());
-        assert!(original_timeout.is_none());
 
         std::env::set_var("DB_POOL_SIZE", "20");
         std::env::set_var("DB_CONNECTION_TIMEOUT_MS", "60000");
