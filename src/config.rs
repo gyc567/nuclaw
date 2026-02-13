@@ -42,6 +42,10 @@ pub fn anthropic_base_url() -> Option<String> {
     env::var("ANTHROPIC_BASE_URL").ok()
 }
 
+pub fn claude_model() -> Option<String> {
+    env::var("CLAUDE_MODEL").ok()
+}
+
 pub fn timezone() -> String {
     env::var("TZ").unwrap_or_else(|_| "UTC".to_string())
 }
@@ -101,5 +105,16 @@ mod tests {
         );
 
         std::env::remove_var("ANTHROPIC_BASE_URL");
+    }
+
+    #[test]
+    fn test_claude_model_from_env() {
+        std::env::remove_var("CLAUDE_MODEL");
+        assert!(claude_model().is_none());
+
+        std::env::set_var("CLAUDE_MODEL", "MiniMax-M2.5");
+        assert_eq!(claude_model(), Some("MiniMax-M2.5".to_string()));
+
+        std::env::remove_var("CLAUDE_MODEL");
     }
 }

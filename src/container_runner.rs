@@ -10,7 +10,7 @@
 //! - Configurable timeout
 //! - Output parsing with sentinel markers
 
-use crate::config::{anthropic_api_key, anthropic_base_url, assistant_name, data_dir, groups_dir, logs_dir};
+use crate::config::{anthropic_api_key, anthropic_base_url, assistant_name, claude_model, data_dir, groups_dir, logs_dir};
 use crate::error::{NuClawError, Result};
 use crate::types::{ContainerInput, ContainerOutput};
 use std::fs;
@@ -174,6 +174,10 @@ async fn build_container_command(
         
         if anthropic_base_url().is_some() {
             cmd.arg("-e").arg("ANTHROPIC_BASE_URL");
+        }
+        
+        if claude_model().is_some() {
+            cmd.arg("-e").arg("CLAUDE_MODEL");
         }
         
         cmd.arg("--entrypoint")
