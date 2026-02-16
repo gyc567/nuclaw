@@ -523,6 +523,15 @@ pub fn format_duration(duration_ms: i64) -> String {
 mod tests {
     use super::*;
 
+    fn setup_test_dirs() {
+        use std::fs;
+        use crate::config::store_dir;
+        let store = store_dir();
+        if !store.exists() {
+            let _ = fs::create_dir_all(&store);
+        }
+    }
+
     #[test]
     fn test_parse_cron_expression() {
         // Use 6-field format with seconds (cron crate standard)
@@ -559,6 +568,7 @@ mod tests {
 
     #[test]
     fn test_calculate_interval_next_run() {
+        setup_test_dirs();
         let scheduler = TaskScheduler::new(Database::new().unwrap());
         let next = scheduler.calculate_next_interval_run("3600000".to_string());
         assert!(next.is_some());
@@ -572,6 +582,7 @@ mod tests {
 
     #[test]
     fn test_calculate_interval_next_run_invalid() {
+        setup_test_dirs();
         let scheduler = TaskScheduler::new(Database::new().unwrap());
         let next = scheduler.calculate_next_interval_run("not_a_number".to_string());
         assert!(next.is_none());
@@ -579,6 +590,7 @@ mod tests {
 
     #[test]
     fn test_calculate_interval_next_run_zero() {
+        setup_test_dirs();
         let scheduler = TaskScheduler::new(Database::new().unwrap());
         let next = scheduler.calculate_next_interval_run("0".to_string());
         assert!(next.is_some());
@@ -591,6 +603,7 @@ mod tests {
 
     #[test]
     fn test_calculate_next_cron_run() {
+        setup_test_dirs();
         let scheduler = TaskScheduler::new(Database::new().unwrap());
         let task = ScheduledTask {
             id: "test".to_string(),
@@ -612,6 +625,7 @@ mod tests {
 
     #[test]
     fn test_calculate_next_run_once() {
+        setup_test_dirs();
         let scheduler = TaskScheduler::new(Database::new().unwrap());
         let task = ScheduledTask {
             id: "test".to_string(),
@@ -633,6 +647,7 @@ mod tests {
 
     #[test]
     fn test_calculate_next_run_invalid_type() {
+        setup_test_dirs();
         let scheduler = TaskScheduler::new(Database::new().unwrap());
         let task = ScheduledTask {
             id: "test".to_string(),
@@ -715,6 +730,7 @@ mod tests {
 
     #[test]
     fn test_task_scheduler_new() {
+        setup_test_dirs();
         let db = Database::new().unwrap();
         let scheduler = TaskScheduler::new(db);
         // Just verify it was created
@@ -724,6 +740,7 @@ mod tests {
 
     #[test]
     fn test_scheduler_clone() {
+        setup_test_dirs();
         let db = Database::new().unwrap();
         let scheduler = TaskScheduler::new(db);
         let _cloned = scheduler.clone();

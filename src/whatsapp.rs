@@ -409,6 +409,15 @@ pub fn get_group_name_from_jid(jid: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn setup_test_dirs() {
+        use std::fs;
+        use crate::config::store_dir;
+        let store = store_dir();
+        if !store.exists() {
+            let _ = fs::create_dir_all(&store);
+        }
+    }
+
     #[test]
     fn test_truncate_short() {
         assert_eq!(truncate("hello", 10), "hello");
@@ -421,6 +430,7 @@ mod tests {
 
     #[test]
     fn test_extract_trigger_with_at() {
+        setup_test_dirs();
         let client = WhatsAppClient {
             connected: false,
             last_qr: None,
@@ -442,6 +452,7 @@ mod tests {
 
     #[test]
     fn test_extract_trigger_without_at() {
+        setup_test_dirs();
         let client = WhatsAppClient {
             connected: false,
             last_qr: None,

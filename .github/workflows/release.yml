@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: macos-14  # Apple Silicon (M1/M2)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            name: macOS ARM64 (Apple Silicon)
+          - target: x86_64-apple-darwin
+            name: macOS x64 (Intel)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Build release
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+          strip target/${{ matrix.target }}/release/nuclaw
+
+      - name: Create tarball
+        run: |
+          tar -czf nuclaw-${{ matrix.name }}.tar.gz -C target/${{ matrix.target }}/release nuclaw
+          echo "ARTIFACT_NAME=nuclaw-${{ matrix.name }}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: nuclaw-${{ matrix.name }}.tar.gz
+          asset_name: nuclaw-${{ matrix.name }}.tar.gz
+          asset_content_type: application/gzip
+
+  create-release:
+    name: Create GitHub Release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: NuClaw v${{ github.ref_name }}
+          body: |
+            ## 安装方式
+
+            ### macOS 一键安装
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/gyc567/nuclaw/main/install.sh | bash
+            ```
+
+            ### 手动安装
+            1. 下载对应的 tar.gz 文件
+            2. 解压到 ~/.nuclaw/
+            3. 配置环境变量并运行
+
+            ## 更新日志
+            请查看 [CHANGELOG](CHANGELOG.md)
+          draft: false
+          prerelease: false

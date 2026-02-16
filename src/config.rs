@@ -3,31 +3,49 @@
 use std::env;
 use std::path::PathBuf;
 
+/// Get NuClaw home directory, defaulting to ~/.nuclaw/
+pub fn nuclaw_home() -> PathBuf {
+    env::var("NUCLAW_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            home::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/Users/user"))
+                .join(".nuclaw")
+        })
+}
+
 pub fn project_root() -> PathBuf {
     env::current_dir().expect("Failed to get current directory")
 }
 
+/// Storage directory for database and credentials
 pub fn store_dir() -> PathBuf {
-    project_root().join("store")
+    nuclaw_home().join("store")
 }
 
+/// Groups directory for group-specific CLAUDE.md files
 pub fn groups_dir() -> PathBuf {
-    project_root().join("groups")
+    nuclaw_home().join("groups")
 }
 
+/// Runtime data directory (sessions, IPC)
 pub fn data_dir() -> PathBuf {
-    project_root().join("data")
+    nuclaw_home().join("data")
 }
 
+/// Logs directory
 pub fn logs_dir() -> PathBuf {
     groups_dir().join("logs")
 }
 
+/// Mount allowlist configuration path
 pub fn mount_allowlist_path() -> PathBuf {
-    let home = home::home_dir().unwrap_or_else(|| PathBuf::from("/Users/user"));
-    home.join(".config")
-        .join("nuclaw")
-        .join("mount-allowlist.json")
+    nuclaw_home().join("mount-allowlist.json")
+}
+
+/// Main configuration file path
+pub fn config_path() -> PathBuf {
+    nuclaw_home().join("config.json")
 }
 
 pub fn assistant_name() -> String {
@@ -68,6 +86,29 @@ pub fn ensure_directories() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_nuclaw_home_default() {
+        std::env::remove_var("NUCLAW_HOME");
+        let home = nuclaw_home();
+        assert!(home.to_string_lossy().contains(".nuclaw"));
+    }
+
+    #[test]
+    fn test_nuclaw_home_from_env() {
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/custom/path");
+        assert_eq!(nuclaw_home(), PathBuf::from("/custom/path"));
+        std::env::remove_var("NUCLAW_HOME");
+    }
+
+    #[test]
+    fn test_store_dir_uses_nuclaw_home() {
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/test/nuclaw");
+        assert_eq!(store_dir(), PathBuf::from("/test/nuclaw/store"));
+        std::env::remove_var("NUCLAW_HOME");
+    }
 
     #[test]
     fn test_anthropic_api_key_from_env() {

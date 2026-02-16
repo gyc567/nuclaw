@@ -187,11 +187,21 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    fn setup_test_dirs() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // Create store directory for tests
+        let store = store_dir();
+        if !store.exists() {
+            let _ = fs::create_dir_all(&store);
+        }
+    }
+
     fn test_db_path() -> PathBuf {
         store_dir().join("test_nuclaw.db")
     }
 
     fn cleanup_test_db(path: &PathBuf) {
+        let _guard = ENV_LOCK.lock().unwrap();
         let _ = fs::remove_file(path);
         let _ = fs::remove_file(path.with_extension("db-wal"));
         let _ = fs::remove_file(path.with_extension("db-shm"));
@@ -199,6 +209,7 @@ mod tests {
 
     #[test]
     fn test_database_new() {
+        setup_test_dirs();
         let db_path = test_db_path();
         cleanup_test_db(&db_path);
 
@@ -222,6 +233,7 @@ mod tests {
 
     #[test]
     fn test_get_connection() {
+        setup_test_dirs();
         let db_path = test_db_path();
         cleanup_test_db(&db_path);
 
@@ -239,6 +251,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_connections() {
+        setup_test_dirs();
         let db_path = test_db_path();
         cleanup_test_db(&db_path);
 
@@ -269,6 +282,7 @@ mod tests {
 
     #[test]
     fn test_pool_status() {
+        setup_test_dirs();
         let db_path = test_db_path();
         cleanup_test_db(&db_path);
 
@@ -322,6 +336,7 @@ mod tests {
 
     #[test]
     fn test_schema_initialization() {
+        setup_test_dirs();
         let db_path = test_db_path();
         cleanup_test_db(&db_path);
 
@@ -352,6 +367,7 @@ mod tests {
 
     #[test]
     fn test_clone_database() {
+        setup_test_dirs();
         let db_path = test_db_path();
         cleanup_test_db(&db_path);
 

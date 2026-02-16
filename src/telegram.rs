@@ -649,6 +649,15 @@ impl GroupPolicy {
 mod tests {
     use super::*;
 
+    fn setup_test_dirs() {
+        use std::fs;
+        use crate::config::store_dir;
+        let store = store_dir();
+        if !store.exists() {
+            let _ = fs::create_dir_all(&store);
+        }
+    }
+
     #[test]
     fn test_parse_telegram_update() {
         let json = r#"{
@@ -669,6 +678,7 @@ mod tests {
 
     #[test]
     fn test_extract_trigger_telegram() {
+        setup_test_dirs();
         let client = TelegramClient {
             api_url: "https://api.telegram.org/bottest".to_string(),
             webhook_path: "webhook".to_string(),
@@ -714,6 +724,7 @@ mod tests {
 
     #[test]
     fn test_text_chunking_short() {
+        setup_test_dirs();
         let client = TelegramClient {
             api_url: "https://api.telegram.org/bottest".to_string(),
             webhook_path: "webhook".to_string(),
@@ -734,6 +745,7 @@ mod tests {
 
     #[test]
     fn test_text_chunking_long() {
+        setup_test_dirs();
         let client = TelegramClient {
             api_url: "https://api.telegram.org/bottest".to_string(),
             webhook_path: "webhook".to_string(),
