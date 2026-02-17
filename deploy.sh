@@ -266,6 +266,40 @@ build_project() {
     fi
 }
 
+# 安装到系统 PATH
+install_to_path() {
+    log_step "安装到系统 PATH..."
+
+    local BIN_PATH="/usr/local/bin"
+    local BINARY="$PROJECT_DIR/target/release/nuclaw"
+
+    # 检查二进制文件是否存在
+    if [[ ! -f "$BINARY" ]]; then
+        log_error "二进制文件不存在: $BINARY"
+        return 1
+    fi
+
+    # 尝试使用 sudo 复制到 /usr/local/bin
+    if sudo cp "$BINARY" "/usr/local/bin/nuclaw" && sudo chmod +x "/usr/local/bin/nuclaw"; then
+        log_info "已安装到: /usr/local/bin/nuclaw"
+        return 0
+    fi
+
+    # 如果失败，尝试安装到用户目录
+    mkdir -p "$HOME/.local/bin"
+
+    if cp "$BINARY" "$HOME/.local/bin/nuclaw" && chmod +x "$HOME/.local/bin/nuclaw"; then
+        log_info "已安装到: $HOME/.local/bin/nuclaw"
+        log_info "提示: 请将以下内容添加到 ~/.bashrc 或 ~/.zshrc:"
+        echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        return 0
+    fi
+
+    log_error "安装失败，请手动执行:"
+    echo "  sudo cp $BINARY /usr/local/bin/nuclaw"
+    return 1
+}
+
 # 运行测试
 run_tests() {
     log_step "运行测试..."
@@ -439,12 +473,12 @@ show_usage() {
     echo "  NuClaw 安装完成!"
     echo "==============================================================================="
     echo ""
-    echo "使用方式:"
-    echo "  ./target/release/nuclaw              # 启动服务"
-    echo "  ./target/release/nuclaw --help       # 查看帮助"
-    echo "  ./target/release/nuclaw --auth       # 认证流程"
-    echo "  ./target/release/nuclaw --scheduler # 运行任务调度器"
-    echo "  ./target/release/nuclaw --whatsapp  # 运行 WhatsApp 机器人"
+    echo "使用方式 (全局可用):"
+    echo "  nuclaw              # 启动服务"
+    echo "  nuclaw --help       # 查看帮助"
+    echo "  nuclaw --auth       # 认证流程"
+    echo "  nuclaw --scheduler # 运行任务调度器"
+    echo "  nuclaw --whatsapp  # 运行 WhatsApp 机器人"
     echo ""
     echo "目录说明:"
     echo "  store/    - SQLite 数据库和认证文件"
@@ -481,6 +515,7 @@ main() {
     setup_project
     setup_directories
     build_project
+    install_to_path || log_warn "安装到 PATH 失败，请手动添加"
     run_tests
     verify_installation || TEST_RESULT=$?
 
