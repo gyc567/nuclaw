@@ -76,6 +76,9 @@ hyper = { version = "0.14", features = ["full"] }
 # Process control for container management
 libc = "0.2"
 
+# Async trait support
+async-trait = "0.1"
+
 [dev-dependencies]
 libc = "0.2.180"
 tempfile = "3.12"

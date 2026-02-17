@@ -10,6 +10,9 @@ pub enum NuClawError {
     #[error("Container error: {message}")]
     Container { message: String },
 
+    #[error("API error: {message}")]
+    Api { message: String },
+
     #[error("WhatsApp error: {message}")]
     WhatsApp { message: String },
 
@@ -99,11 +102,13 @@ mod tests {
 
     #[test]
     fn test_all_error_variants() {
-        // Test that all error variants can be created
         let _ = NuClawError::Database {
             message: "test".to_string(),
         };
         let _ = NuClawError::Container {
+            message: "test".to_string(),
+        };
+        let _ = NuClawError::Api {
             message: "test".to_string(),
         };
         let _ = NuClawError::WhatsApp {

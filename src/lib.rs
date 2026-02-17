@@ -7,6 +7,7 @@
 //! - Scheduled task management
 //! - SQLite persistence
 
+pub mod agent_runner;
 pub mod config;
 pub mod container_runner;
 pub mod db;
@@ -19,6 +20,7 @@ pub mod utils;
 pub mod whatsapp;
 
 // Re-exports for convenience
+pub use agent_runner::{create_runner, agent_runner_mode, AgentRunner, AgentRunnerMode};
 pub use config::ensure_directories;
 pub use container_runner::{
     container_timeout, create_group_ipc_directory, ensure_container_system_running,
