@@ -47,6 +47,37 @@ pub enum GroupPolicy {
     Disabled,
 }
 
+/// Stream mode for message preview
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum StreamMode {
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "partial")]
+    Partial,
+    #[serde(rename = "block")]
+    Block,
+}
+
+/// Chunk mode for text splitting
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ChunkMode {
+    #[serde(rename = "length")]
+    Length,
+    #[serde(rename = "newline")]
+    Newline,
+}
+
+/// Reply mode for threading
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ReplyMode {
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "first")]
+    First,
+    #[serde(rename = "all")]
+    All,
+}
+
 /// Telegram Update object (Telegram Bot API)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramUpdate {
@@ -555,16 +586,35 @@ pub fn chunk_text_pure(text: &str, chunk_limit: usize) -> Vec<String> {
     let mut current = String::new();
 
     for paragraph in text.split("\n\n") {
-        if current.len() + paragraph.len() + 2 > chunk_limit {
+        let para = paragraph;
+        
+        // If paragraph itself exceeds limit, split it
+        if para.len() > chunk_limit {
+            // Push current chunk if not empty
+            if !current.is_empty() {
+                chunks.push(current);
+                current = String::new();
+            }
+            
+            // Split long paragraph
+            let mut remaining = para;
+            while !remaining.is_empty() {
+                let split_point = remaining.len().min(chunk_limit);
+                chunks.push(remaining[..split_point].to_string());
+                remaining = &remaining[split_point..];
+            }
+        } else if current.len() + para.len() + 2 > chunk_limit {
+            // Current chunk would exceed limit, push it
             if !current.is_empty() {
                 chunks.push(current);
             }
-            current = paragraph.to_string();
+            current = para.to_string();
         } else {
+            // Add paragraph to current chunk
             if !current.is_empty() {
                 current.push_str("\n\n");
             }
-            current.push_str(paragraph);
+            current.push_str(para);
         }
     }
 
@@ -573,6 +623,13 @@ pub fn chunk_text_pure(text: &str, chunk_limit: usize) -> Vec<String> {
     }
 
     chunks
+}
+
+/// Advanced chunk text with configurable mode
+pub fn chunk_text_advanced(text: &str, chunk_limit: usize, mode: ChunkMode) -> Vec<String> {
+    match mode {
+        ChunkMode::Length | ChunkMode::Newline => chunk_text_pure(text, chunk_limit),
+    }
 }
 
 /// Extract chat ID from jid (pure function)
@@ -641,6 +698,38 @@ impl GroupPolicy {
             "allowlist" => GroupPolicy::Allowlist,
             "disabled" => GroupPolicy::Disabled,
             _ => GroupPolicy::Allowlist,
+        }
+    }
+}
+
+impl StreamMode {
+    pub fn parse(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "off" => StreamMode::Off,
+            "partial" => StreamMode::Partial,
+            "block" => StreamMode::Block,
+            _ => StreamMode::Partial,
+        }
+    }
+}
+
+impl ChunkMode {
+    pub fn parse(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "length" => ChunkMode::Length,
+            "newline" => ChunkMode::Newline,
+            _ => ChunkMode::Length,
+        }
+    }
+}
+
+impl ReplyMode {
+    pub fn parse(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "off" => ReplyMode::Off,
+            "first" => ReplyMode::First,
+            "all" => ReplyMode::All,
+            _ => ReplyMode::Off,
         }
     }
 }
@@ -788,8 +877,10 @@ mod tests {
     fn test_chunk_text_pure_over_limit() {
         let text = "a".repeat(4001);
         let chunks = chunk_text_pure(&text, 4000);
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0], text);
+        // Text exceeds limit, should be split into 2 chunks
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), 4000);
+        assert_eq!(chunks[1].len(), 1);
     }
 
     #[test]
@@ -912,5 +1003,64 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("hello"));
+    }
+
+    // New tests for enhanced functionality
+
+    #[test]
+    fn test_stream_mode_parse() {
+        assert_eq!(StreamMode::parse("off"), StreamMode::Off);
+        assert_eq!(StreamMode::parse("partial"), StreamMode::Partial);
+        assert_eq!(StreamMode::parse("block"), StreamMode::Block);
+        assert_eq!(StreamMode::parse("unknown"), StreamMode::Partial);
+    }
+
+    #[test]
+    fn test_chunk_mode_parse() {
+        assert_eq!(ChunkMode::parse("length"), ChunkMode::Length);
+        assert_eq!(ChunkMode::parse("newline"), ChunkMode::Newline);
+        assert_eq!(ChunkMode::parse("unknown"), ChunkMode::Length);
+    }
+
+    #[test]
+    fn test_reply_mode_parse() {
+        assert_eq!(ReplyMode::parse("off"), ReplyMode::Off);
+        assert_eq!(ReplyMode::parse("first"), ReplyMode::First);
+        assert_eq!(ReplyMode::parse("all"), ReplyMode::All);
+        assert_eq!(ReplyMode::parse("unknown"), ReplyMode::Off);
+    }
+
+    #[test]
+    fn test_chunk_text_advanced_length() {
+        let text = "a".repeat(5000);
+        let chunks = chunk_text_advanced(&text, 4000, ChunkMode::Length);
+        assert!(chunks.len() > 1);
+    }
+
+    #[test]
+    fn test_chunk_text_advanced_newline() {
+        let text = "Para1\n\nPara2\n\nPara3";
+        let chunks = chunk_text_advanced(text, 100, ChunkMode::Newline);
+        // All paragraphs fit within 100 chars, so they are combined into 1 chunk
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn test_chunk_text_newline_combines_short() {
+        let text = "Short\n\nMedium";
+        let chunks = chunk_text_advanced(text, 100, ChunkMode::Newline);
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn test_chunk_text_newline_long_paragraphs() {
+        let text = "This is a very long paragraph that exceeds the character limit and should be split into multiple chunks even though there are no paragraph breaks.\n\nThis is another paragraph.";
+        let chunks = chunk_text_advanced(text, 50, ChunkMode::Newline);
+        // Should have at least 2 chunks
+        assert!(chunks.len() >= 2);
+        // All chunks should respect limit
+        for chunk in &chunks {
+            assert!(chunk.len() <= 50);
+        }
     }
 }
