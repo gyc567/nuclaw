@@ -1,6 +1,81 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
+use async_trait::async_trait;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+
+use crate::error::{NuClawError, Result};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+impl ChatMessage {
+    pub fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
+    }
+
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
+    }
+
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: "assistant".into(),
+            content: content.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatResponse {
+    pub text: Option<String>,
+}
+
+impl ChatResponse {
+    pub fn has_text(&self) -> bool {
+        self.text.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+    }
+
+    pub fn text_or_empty(&self) -> &str {
+        self.text.as_deref().unwrap_or("")
+    }
+}
+
+#[async_trait]
+pub trait Provider: Send + Sync {
+    fn name(&self) -> &str;
+
+    async fn chat(&self, message: &str, model: &str, temperature: f64) -> Result<String>;
+
+    async fn chat_with_system(
+        &self,
+        _system: Option<&str>,
+        message: &str,
+        model: &str,
+        temperature: f64,
+    ) -> Result<String> {
+        self.chat(message, model, temperature).await
+    }
+
+    fn context_window(&self) -> usize {
+        100000
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        4096
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderSpec {
     pub name: &'static str,
@@ -174,6 +249,278 @@ impl Default for ProviderRegistry {
 
 pub fn provider_registry() -> ProviderRegistry {
     ProviderRegistry::new()
+}
+
+pub struct AnthropicProvider {
+    client: Client,
+    api_key: String,
+    base_url: String,
+    default_model: String,
+}
+
+impl AnthropicProvider {
+    pub fn new(api_key: String, base_url: Option<String>, model: Option<String>) -> Self {
+        Self {
+            client: Client::new(),
+            api_key,
+            base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
+            default_model: model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for AnthropicProvider {
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
+    async fn chat(&self, message: &str, model: &str, temperature: f64) -> Result<String> {
+        self.chat_with_system(None, message, model, temperature).await
+    }
+
+    async fn chat_with_system(
+        &self,
+        system: Option<&str>,
+        message: &str,
+        model: &str,
+        temperature: f64,
+    ) -> Result<String> {
+        let model = if model.is_empty() { &self.default_model } else { model };
+
+        #[derive(serde::Serialize)]
+        struct Request {
+            model: String,
+            max_tokens: usize,
+            temperature: f64,
+            system: Option<String>,
+            messages: Vec<Message>,
+        }
+
+        #[derive(serde::Serialize)]
+        struct Message {
+            role: String,
+            content: String,
+        }
+
+        let request = Request {
+            model: model.to_string(),
+            max_tokens: 4096,
+            temperature,
+            system: system.map(|s| s.to_string()),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: message.to_string(),
+            }],
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/v1/messages", self.base_url))
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| NuClawError::Api {
+                message: format!("Request failed: {}", e),
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(NuClawError::Api {
+                message: format!("API error {}: {}", status, body),
+            }.into());
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Response {
+            content: Vec<ContentBlock>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ContentBlock {
+            text: Option<String>,
+        }
+
+        let resp: Response = response
+            .json()
+            .await
+            .map_err(|e| NuClawError::Api {
+                message: format!("Failed to parse response: {}", e),
+            })?;
+
+        resp.content
+            .into_iter()
+            .find_map(|c| c.text)
+            .ok_or_else(|| NuClawError::Api {
+                message: "No text in response".to_string(),
+            }.into())
+    }
+
+    fn context_window(&self) -> usize {
+        200000
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        8192
+    }
+}
+
+pub struct OpenAIProvider {
+    client: Client,
+    api_key: String,
+    base_url: String,
+    default_model: String,
+}
+
+impl OpenAIProvider {
+    pub fn new(api_key: String, base_url: Option<String>, model: Option<String>) -> Self {
+        Self {
+            client: Client::new(),
+            api_key,
+            base_url: base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+            default_model: model.unwrap_or_else(|| "gpt-4o".to_string()),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for OpenAIProvider {
+    fn name(&self) -> &str {
+        "openai"
+    }
+
+    async fn chat(&self, message: &str, model: &str, temperature: f64) -> Result<String> {
+        self.chat_with_system(None, message, model, temperature).await
+    }
+
+    async fn chat_with_system(
+        &self,
+        system: Option<&str>,
+        message: &str,
+        model: &str,
+        temperature: f64,
+    ) -> Result<String> {
+        let model = if model.is_empty() { &self.default_model } else { model };
+
+        #[derive(serde::Serialize)]
+        struct Request {
+            model: String,
+            temperature: f64,
+            messages: Vec<Message>,
+        }
+
+        #[derive(serde::Serialize)]
+        struct Message {
+            role: String,
+            content: String,
+        }
+
+        let mut messages = Vec::new();
+        if let Some(sys) = system {
+            messages.push(Message {
+                role: "system".to_string(),
+                content: sys.to_string(),
+            });
+        }
+        messages.push(Message {
+            role: "user".to_string(),
+            content: message.to_string(),
+        });
+
+        let request = Request {
+            model: model.to_string(),
+            temperature,
+            messages,
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/chat/completions", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| NuClawError::Api {
+                message: format!("Request failed: {}", e),
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(NuClawError::Api {
+                message: format!("API error {}: {}", status, body),
+            }.into());
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Response {
+            choices: Vec<Choice>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Choice {
+            message: ResponseMessage,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ResponseMessage {
+            content: String,
+        }
+
+        let resp: Response = response
+            .json()
+            .await
+            .map_err(|e| NuClawError::Api {
+                message: format!("Failed to parse response: {}", e),
+            })?;
+
+        resp.choices
+            .into_iter()
+            .next()
+            .map(|c| c.message.content)
+            .ok_or_else(|| NuClawError::Api {
+                message: "No choices in response".to_string(),
+            }.into())
+    }
+
+    fn context_window(&self) -> usize {
+        128000
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        16384
+    }
+}
+
+pub fn create_provider(name: &str, config: &ProviderConfig) -> Option<Box<dyn Provider>> {
+    match name {
+        "anthropic" => {
+            if let Some(api_key) = &config.api_key {
+                Some(Box::new(AnthropicProvider::new(
+                    api_key.clone(),
+                    config.base_url.clone(),
+                    config.model.clone(),
+                )))
+            } else {
+                None
+            }
+        }
+        "openai" => {
+            if let Some(api_key) = &config.api_key {
+                Some(Box::new(OpenAIProvider::new(
+                    api_key.clone(),
+                    config.base_url.clone(),
+                    config.model.clone(),
+                )))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

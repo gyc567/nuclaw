@@ -4,7 +4,7 @@ This file provides guidance for AI coding agents working on NuClaw.
 
 ## Project Overview
 
-NuClaw is a Rust implementation of NanoClaw - a personal Claude assistant that:
+NuClaw is a personal Claude assistant that:
 - Connects to WhatsApp/Telegram for messaging
 - Runs AI agents in isolated containers (Docker/Apple Container)
 - Supports scheduled tasks with cron expressions

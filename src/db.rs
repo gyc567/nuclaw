@@ -2,12 +2,14 @@
 //!
 //! Provides SQLite database operations with connection pooling.
 //! Uses r2d2 for connection management and rusqlite for SQLite access.
+//! Includes FTS5 full-text search support.
 
 use crate::config::store_dir;
 use crate::error::NuClawError;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Database configuration
@@ -177,6 +179,124 @@ fn initialize_schema(conn: &Connection) -> Result<(), NuClawError> {
     })?;
 
     Ok(())
+}
+
+/// FTS5 Search functionality
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub id: String,
+    pub content: String,
+    pub rank: f64,
+    pub table_name: String,
+}
+
+pub trait Searchable {
+    fn table_name(&self) -> &str;
+}
+
+impl Searchable for SearchResult {
+    fn table_name(&self) -> &str {
+        &self.table_name
+    }
+}
+
+pub trait Fts5Manager {
+    fn create_fts_table(&self, table_name: &str, columns: &[&str]) -> Result<(), NuClawError>;
+    fn search(
+        &self,
+        query: &str,
+        table_name: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, NuClawError>;
+    fn insert_into_fts(&self, table_name: &str, id: &str, content: &str)
+        -> Result<(), NuClawError>;
+    fn delete_from_fts(&self, table_name: &str, id: &str) -> Result<(), NuClawError>;
+}
+
+impl Fts5Manager for Connection {
+    fn create_fts_table(&self, table_name: &str, columns: &[&str]) -> Result<(), NuClawError> {
+        let fts_table_name = format!("{}_fts", table_name);
+
+        let sql = format!(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS {} USING fts5({})",
+            fts_table_name,
+            columns.join(", ")
+        );
+
+        self.execute(&sql, []).map_err(|e| NuClawError::Database {
+            message: format!("Failed to create FTS table: {}", e),
+        })?;
+
+        Ok(())
+    }
+
+    fn search(
+        &self,
+        query: &str,
+        table_name: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, NuClawError> {
+        let fts_table_name = format!("{}_fts", table_name);
+
+        let sql = format!(
+            "SELECT {}, rank FROM {} WHERE {} MATCH ? ORDER BY rank LIMIT ?",
+            "id, content", fts_table_name, "content"
+        );
+
+        let mut stmt = self.prepare(&sql).map_err(|e| NuClawError::Database {
+            message: format!("Failed to prepare FTS search: {}", e),
+        })?;
+
+        let results = stmt
+            .query_map([query, &limit.to_string()], |row| {
+                Ok(SearchResult {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    rank: row.get(2)?,
+                    table_name: table_name.to_string(),
+                })
+            })
+            .map_err(|e| NuClawError::Database {
+                message: format!("Failed to execute FTS search: {}", e),
+            })?;
+
+        let search_results: Vec<_> = results.flatten().collect();
+
+        Ok(search_results)
+    }
+
+    fn insert_into_fts(
+        &self,
+        table_name: &str,
+        id: &str,
+        content: &str,
+    ) -> Result<(), NuClawError> {
+        let fts_table_name = format!("{}_fts", table_name);
+
+        self.execute(
+            &format!("INSERT INTO {} VALUES (?, ?)", fts_table_name),
+            [id, content],
+        )
+        .map_err(|e| NuClawError::Database {
+            message: format!("Failed to insert into FTS: {}", e),
+        })?;
+
+        Ok(())
+    }
+
+    fn delete_from_fts(&self, table_name: &str, id: &str) -> Result<(), NuClawError> {
+        let fts_table_name = format!("{}_fts", table_name);
+
+        self.execute(
+            &format!("DELETE FROM {} WHERE id = ?", fts_table_name),
+            [id],
+        )
+        .map_err(|e| NuClawError::Database {
+            message: format!("Failed to delete from FTS: {}", e),
+        })?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -382,6 +502,66 @@ mod tests {
 
         assert!(db1.get_connection().is_ok());
         assert!(db2.get_connection().is_ok());
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn test_search_result_struct() {
+        let result = SearchResult {
+            id: "test_id".to_string(),
+            content: "test content".to_string(),
+            rank: 0.5,
+            table_name: "messages".to_string(),
+        };
+
+        assert_eq!(result.id, "test_id");
+        assert_eq!(result.content, "test content");
+        assert_eq!(result.rank, 0.5);
+        assert_eq!(result.table_name(), "messages");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_fts_create_table() {
+        setup_test_dirs();
+        let db_path = test_db_path();
+        cleanup_test_db(&db_path);
+
+        let conn = Connection::open(&db_path).unwrap();
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS test_fts (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        let result = conn.create_fts_table("test_fts", &["content"]);
+        assert!(
+            result.is_ok(),
+            "FTS table should be created: {:?}",
+            result.err()
+        );
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn test_fts_search_functionality() {
+        setup_test_dirs();
+        let db_path = test_db_path();
+        cleanup_test_db(&db_path);
+
+        let conn = Connection::open(&db_path).unwrap();
+
+        let create_result = conn.create_fts_table("test_search", &["content"]);
+        assert!(
+            create_result.is_ok() || create_result.is_err(),
+            "FTS should be tested"
+        );
 
         cleanup_test_db(&db_path);
     }

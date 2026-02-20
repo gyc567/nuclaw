@@ -7,15 +7,14 @@
 [![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/gyc567/nuclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/gyc567/nuclaw/actions)
-[![Tests](https://img.shields.io/badge/Tests-52%2F52%20passing-brightgreen.svg)](docs/TEST_REPORT.md)
+[![Tests](https://img.shields.io/badge/Tests-120%2F120%20passing-brightgreen.svg)](docs/TEST_REPORT.md)
 
-NuClaw 是 NanoClaw 的 Rust 实现版本 - 一个运行在隔离容器中的个人 Claude 助手。
+一个运行在隔离容器中的个人 Claude 助手。
 
 [English](README.md) | 简体中文
 
 ## 为什么选择 Rust?
 
-本项目是 [NanoClaw](https://github.com/gavrielc/nanoclaw) 的完整 Rust 重写版本，具备以下优势：
 - **性能** - 更快的启动速度和更低的内存占用
 - **安全性** - 内存安全和线程安全保证
 - **并发性** - 更好的异步 I/O 处理能力

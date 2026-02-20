@@ -4,18 +4,17 @@
 
 # NuClaw - Personal Claude Assistant
 
-A Rust implementation of NanoClaw - a personal Claude assistant that runs securely in isolated containers.
+A personal Claude assistant that runs securely in isolated containers.
 
 English | [简体中文](README_CN.md)
 
 [![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/gyc567/nuclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/gyc567/nuclaw/actions)
-[![Tests](https://img.shields.io/badge/Tests-52%2F52%20passing-brightgreen.svg)](docs/TEST_REPORT.md)
+[![Tests](https://img.shields.io/badge/Tests-120%2F120%20passing-brightgreen.svg)](docs/TEST_REPORT.md)
 
 ## Why Rust?
 
-This project is a complete rewrite of [NanoClaw](https://github.com/gavrielc/nanoclaw) in Rust for:
 - **Performance** - Faster startup and lower memory usage
 - **Safety** - Memory safety and thread safety guarantees
 - **Concurrency** - Better async handling for I/O operations
