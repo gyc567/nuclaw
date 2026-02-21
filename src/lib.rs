@@ -16,6 +16,7 @@ pub mod container_runner;
 pub mod db;
 pub mod error;
 pub mod logging;
+pub mod maintenance;
 pub mod memory;
 pub mod observer;
 pub mod providers;
