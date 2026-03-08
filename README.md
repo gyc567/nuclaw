@@ -2,9 +2,9 @@
   <img src="docs/nuClawLogo.png" alt="NuClaw Logo" width="200"/>
 </div>
 
-# NuClaw - Personal Claude Assistant
+# NuClaw - Personal AI Assistant
 
-A personal Claude assistant that runs securely in isolated containers.
+A Rust implementation of OpenClaw - a personal AI assistant that runs securely in isolated containers.
 
 English | [简体中文](README_CN.md)
 
