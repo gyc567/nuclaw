@@ -178,6 +178,47 @@ fn initialize_schema(conn: &Connection) -> Result<(), NuClawError> {
         message: format!("Failed to create task_run_logs table: {}", e),
     })?;
 
+    // Create indexes for better query performance
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_chat_jid ON messages(chat_jid)",
+        [],
+    )
+    .map_err(|e| NuClawError::Database {
+        message: format!("Failed to create messages chat_jid index: {}", e),
+    })?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)",
+        [],
+    )
+    .map_err(|e| NuClawError::Database {
+        message: format!("Failed to create messages timestamp index: {}", e),
+    })?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run ON scheduled_tasks(next_run)",
+        [],
+    )
+    .map_err(|e| NuClawError::Database {
+        message: format!("Failed to create scheduled_tasks next_run index: {}", e),
+    })?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status)",
+        [],
+    )
+    .map_err(|e| NuClawError::Database {
+        message: format!("Failed to create scheduled_tasks status index: {}", e),
+    })?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_run_logs_task_id ON task_run_logs(task_id)",
+        [],
+    )
+    .map_err(|e| NuClawError::Database {
+        message: format!("Failed to create task_run_logs task_id index: {}", e),
+    })?;
+
     Ok(())
 }
 

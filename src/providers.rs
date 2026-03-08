@@ -7,6 +7,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{NuClawError, Result};
 
+// Token limits for different providers
+/// Anthropic default context window
+pub const ANTHROPIC_CONTEXT_WINDOW: usize = 100_000;
+/// Anthropic vision model context window
+pub const ANTHROPIC_VISION_CONTEXT_WINDOW: usize = 200_000;
+/// Anthropic default max output tokens
+pub const ANTHROPIC_MAX_OUTPUT_TOKENS: usize = 4_096;
+/// Anthropic vision model max output tokens
+pub const ANTHROPIC_VISION_MAX_OUTPUT_TOKENS: usize = 8_192;
+/// OpenAI default context window
+pub const OPENAI_CONTEXT_WINDOW: usize = 128_000;
+/// OpenAI default max output tokens
+pub const OPENAI_MAX_OUTPUT_TOKENS: usize = 16_384;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
@@ -68,11 +81,11 @@ pub trait Provider: Send + Sync {
     }
 
     fn context_window(&self) -> usize {
-        100000
+        ANTHROPIC_CONTEXT_WINDOW
     }
 
     fn max_output_tokens(&self) -> usize {
-        4096
+        ANTHROPIC_MAX_OUTPUT_TOKENS
     }
 }
 
@@ -310,7 +323,7 @@ impl Provider for AnthropicProvider {
 
         let request = Request {
             model: model.to_string(),
-            max_tokens: 4096,
+            max_tokens: ANTHROPIC_MAX_OUTPUT_TOKENS,
             temperature,
             system: system.map(|s| s.to_string()),
             messages: vec![Message {
@@ -362,11 +375,11 @@ impl Provider for AnthropicProvider {
     }
 
     fn context_window(&self) -> usize {
-        200000
+        ANTHROPIC_VISION_CONTEXT_WINDOW
     }
 
     fn max_output_tokens(&self) -> usize {
-        8192
+        ANTHROPIC_VISION_MAX_OUTPUT_TOKENS
     }
 }
 
@@ -491,11 +504,11 @@ impl Provider for OpenAIProvider {
     }
 
     fn context_window(&self) -> usize {
-        128000
+        OPENAI_CONTEXT_WINDOW
     }
 
     fn max_output_tokens(&self) -> usize {
-        16384
+        OPENAI_MAX_OUTPUT_TOKENS
     }
 }
 

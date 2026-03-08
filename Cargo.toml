@@ -61,7 +61,7 @@ tempfile = "3.12"
 thiserror = "2.0"
 
 # CLI arguments
-structopt = "0.3"
+clap = { version = "4", features = ["derive"] }
 
 # Random for ID generation
 rand = "0.8"
@@ -98,8 +98,4 @@ lto = true
 codegen-units = 1
 strip = true
 
-[profile.dev]
-clippy = "warn"
 
-[profile.release.clippy]
-warn = true

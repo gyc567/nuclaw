@@ -17,22 +17,22 @@ use nuclaw::task_scheduler::TaskScheduler;
 use nuclaw::telegram;
 use nuclaw::whatsapp;
 
-use structopt::StructOpt;
+use clap::Parser;
 use tokio::signal;
 use tracing::{info, warn};
 
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 struct Args {
-    #[structopt(long)]
+    #[arg(long)]
     auth: bool,
 
-    #[structopt(long)]
+    #[arg(long)]
     scheduler: bool,
 
-    #[structopt(long)]
+    #[arg(long)]
     whatsapp: bool,
 
-    #[structopt(long)]
+    #[arg(long)]
     telegram: bool,
 
     #[structopt(long)]
@@ -62,7 +62,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::from_args();
+    let args = Args::parse();
 
     // Load .env file if exists (auto-loaded for convenience)
     config::load_env_file();

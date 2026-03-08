@@ -376,9 +376,7 @@ impl WarmMemory {
         match result {
             Ok(entry) => Ok(Some(entry)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(NuClawError::Database {
-                message: e.to_string(),
-            }),
+            Err(e) => Err(NuClawError::Database { message: e.to_string() }),
         }
     }
 
@@ -628,9 +626,7 @@ impl ColdMemory {
         match result {
             Ok(entry) => Ok(Some(entry)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(NuClawError::Database {
-                message: e.to_string(),
-            }),
+            Err(e) => Err(NuClawError::Database { message: e.to_string() }),
         }
     }
 
@@ -1080,9 +1076,7 @@ impl Memory for SqliteMemory {
         match result {
             Ok(entry) => Ok(Some(entry)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(NuClawError::Database {
-                message: e.to_string(),
-            }),
+            Err(e) => Err(NuClawError::Database { message: e.to_string() }),
         }
     }
 

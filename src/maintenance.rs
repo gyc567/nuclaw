@@ -28,7 +28,7 @@ impl ContentArchiver {
     }
 
     pub fn should_archive(&self, path: &Path) -> bool {
-        if path.file_name().is_none_or(|n| n != "MEMORY.md") {
+        if !path.file_name().is_some_and(|n| n == "MEMORY.md") {
             return false;
         }
 
