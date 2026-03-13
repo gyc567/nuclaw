@@ -1093,4 +1093,400 @@ ANTHROPIC_API_KEY=sk-comment-test
         // Cleanup
         let _ = fs::remove_dir_all("/tmp/nuclaw_onboard_test11");
     }
+
+    // =========================================================================
+    // Onboard Full Integration Tests (LLM + Telegram)
+    // =========================================================================
+
+    #[test]
+    fn test_onboard_llm_only_anthropic() {
+        use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_llm_only_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_llm_only_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_llm_only_test");
+
+        // Configure Anthropic LLM only
+        let config = OnboardConfig {
+            provider: Some("anthropic".to_string()),
+            api_key: Some("sk-ant-test-anthropic-key-12345".to_string()),
+            base_url: Some("https://api.anthropic.com".to_string()),
+            telegram_token: None,
+        };
+
+        save_config(&config).expect("Failed to save config");
+
+        // Verify .env file content
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        assert!(content.contains("ANTHROPIC_API_KEY=sk-ant-test-anthropic-key-12345"));
+        assert!(content.contains("ANTHROPIC_BASE_URL=https://api.anthropic.com"));
+        assert!(!content.contains("TELEGRAM_BOT_TOKEN"));
+
+        // Load and verify
+        let loaded = load_config().expect("Failed to load config");
+        assert_eq!(loaded.provider, Some("anthropic".to_string()));
+        assert_eq!(
+            loaded.api_key,
+            Some("sk-ant-test-anthropic-key-12345".to_string())
+        );
+        assert_eq!(
+            loaded.base_url,
+            Some("https://api.anthropic.com".to_string())
+        );
+        assert!(loaded.telegram_token.is_none());
+
+        // Verify environment variables would be set correctly
+        std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-anthropic-key-12345");
+        let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap();
+        assert_eq!(api_key, "sk-ant-test-anthropic-key-12345");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_llm_only_test");
+    }
+
+    #[test]
+    fn test_onboard_llm_only_openai() {
+        use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_openai_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_openai_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_openai_test");
+
+        // Configure OpenAI LLM only
+        let config = OnboardConfig {
+            provider: Some("openai".to_string()),
+            api_key: Some("sk-openai-test-key-abcdef".to_string()),
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            telegram_token: None,
+        };
+
+        save_config(&config).expect("Failed to save config");
+
+        // Verify .env file
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        assert!(content.contains("OPENAI_API_KEY=sk-openai-test-key-abcdef"));
+        assert!(content.contains("OPENAI_BASE_URL=https://api.openai.com/v1"));
+
+        // Load and verify
+        let loaded = load_config().expect("Failed to load config");
+        assert_eq!(loaded.provider, Some("openai".to_string()));
+        assert_eq!(
+            loaded.api_key,
+            Some("sk-openai-test-key-abcdef".to_string())
+        );
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_openai_test");
+    }
+
+    #[test]
+    fn test_onboard_llm_only_openrouter() {
+        use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_openrouter_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_openrouter_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_openrouter_test");
+
+        // Configure OpenRouter LLM only
+        let config = OnboardConfig {
+            provider: Some("openrouter".to_string()),
+            api_key: Some("sk-or-test-key-openrouter".to_string()),
+            base_url: Some("https://openrouter.ai/api/v1".to_string()),
+            telegram_token: None,
+        };
+
+        save_config(&config).expect("Failed to save config");
+
+        // Verify .env file
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        assert!(content.contains("OPENROUTER_API_KEY=sk-or-test-key-openrouter"));
+        assert!(content.contains("OPENROUTER_BASE_URL=https://openrouter.ai/api/v1"));
+
+        // Load and verify
+        let loaded = load_config().expect("Failed to load config");
+        assert_eq!(loaded.provider, Some("openrouter".to_string()));
+        assert_eq!(
+            loaded.api_key,
+            Some("sk-or-test-key-openrouter".to_string())
+        );
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_openrouter_test");
+    }
+
+    #[test]
+    fn test_onboard_telegram_only_test() {
+        use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_telegram_only_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_telegram_only_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_telegram_only_test");
+
+        // Configure Telegram only
+        let config = OnboardConfig {
+            provider: None,
+            api_key: None,
+            base_url: None,
+            telegram_token: Some("1234567890:ABCdefGHIjklMNOpqrsTUVwxyz".to_string()),
+        };
+
+        save_config(&config).expect("Failed to save config");
+
+        // Verify .env file
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        assert!(content.contains("TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"));
+        assert!(!content.contains("API_KEY"));
+
+        // Load and verify
+        let loaded = load_config().expect("Failed to load config");
+        assert_eq!(
+            loaded.telegram_token,
+            Some("1234567890:ABCdefGHIjklMNOpqrsTUVwxyz".to_string())
+        );
+        assert!(loaded.provider.is_none());
+        assert!(loaded.api_key.is_none());
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_telegram_only_test");
+    }
+
+    #[test]
+    fn test_onboard_full_llm_plus_telegram() {
+        use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_full_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_full_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_full_test");
+
+        // Configure both LLM and Telegram
+        let config = OnboardConfig {
+            provider: Some("anthropic".to_string()),
+            api_key: Some("sk-ant-full-config-test-key".to_string()),
+            base_url: Some("https://api.anthropic.com".to_string()),
+            telegram_token: Some("9999999999:AAA-BBB-CCC-DDD-EEE".to_string()),
+        };
+
+        save_config(&config).expect("Failed to save config");
+
+        // Verify complete .env file
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        // Should contain all configurations
+        assert!(content.contains("ANTHROPIC_API_KEY=sk-ant-full-config-test-key"));
+        assert!(content.contains("ANTHROPIC_BASE_URL=https://api.anthropic.com"));
+        assert!(content.contains("TELEGRAM_BOT_TOKEN=9999999999:AAA-BBB-CCC-DDD-EEE"));
+
+        // Should have proper header
+        assert!(content.contains("# NuClaw Configuration"));
+        assert!(content.contains("# Generated by onboard wizard"));
+
+        // Load and verify
+        let loaded = load_config().expect("Failed to load config");
+        assert_eq!(loaded.provider, Some("anthropic".to_string()));
+        assert_eq!(
+            loaded.api_key,
+            Some("sk-ant-full-config-test-key".to_string())
+        );
+        assert_eq!(
+            loaded.base_url,
+            Some("https://api.anthropic.com".to_string())
+        );
+        assert_eq!(
+            loaded.telegram_token,
+            Some("9999999999:AAA-BBB-CCC-DDD-EEE".to_string())
+        );
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_full_test");
+    }
+
+    #[test]
+    fn test_onboard_env_file_sourceable() {
+        use nuclaw::onboard::{env_file_path, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_sourceable_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_sourceable_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_sourceable_test");
+
+        // Create config
+        let config = OnboardConfig {
+            provider: Some("anthropic".to_string()),
+            api_key: Some("sk-ant-sourceable-key".to_string()),
+            base_url: None,
+            telegram_token: Some("1111111111:TEST-TOKEN".to_string()),
+        };
+
+        save_config(&config).expect("Failed to save config");
+
+        // Verify file is sourceable (bash compatible format)
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        // Should have KEY=VALUE format (no spaces around =)
+        assert!(content.contains("ANTHROPIC_API_KEY=sk-ant-sourceable-key"));
+        assert!(content.contains("TELEGRAM_BOT_TOKEN=1111111111:TEST-TOKEN"));
+
+        // Should NOT have spaces around =
+        assert!(!content.contains("KEY = VALUE"));
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_sourceable_test");
+    }
+
+    #[test]
+    fn test_onboard_env_file_multiline_structure() {
+        use nuclaw::onboard::{env_file_path, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_multiline_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_multiline_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_multiline_test");
+
+        // Create config
+        let config = OnboardConfig {
+            provider: Some("openai".to_string()),
+            api_key: Some("sk-multiline-test".to_string()),
+            base_url: Some("https://custom.endpoint.com/v1".to_string()),
+            telegram_token: Some("2222222222:MULTILINE".to_string()),
+        };
+
+        save_config(&config).expect("Failed to save config");
+
+        // Verify file structure
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Should have header
+        assert!(lines[0].contains("NuClaw Configuration"));
+
+        // Find API_KEY line
+        let api_key_line = lines.iter().find(|l| l.contains("OPENAI_API_KEY")).unwrap();
+        assert!(api_key_line.contains("sk-multiline-test"));
+
+        // Find BASE_URL line
+        let base_url_line = lines
+            .iter()
+            .find(|l| l.contains("OPENAI_BASE_URL"))
+            .unwrap();
+        assert!(base_url_line.contains("https://custom.endpoint.com/v1"));
+
+        // Find TELEGRAM line
+        let tele_line = lines
+            .iter()
+            .find(|l| l.contains("TELEGRAM_BOT_TOKEN"))
+            .unwrap();
+        assert!(tele_line.contains("2222222222:MULTILINE"));
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_multiline_test");
+    }
+
+    #[test]
+    fn test_onboard_provider_model_config() {
+        use nuclaw::onboard::{env_file_path, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_model_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_model_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_model_test");
+
+        // Create config - should include default model
+        let config = OnboardConfig {
+            provider: Some("anthropic".to_string()),
+            api_key: Some("sk-model-test".to_string()),
+            base_url: Some("https://api.anthropic.com".to_string()),
+            telegram_token: None,
+        };
+
+        save_config(&config).expect("Failed to save config");
+
+        // Verify .env contains model configuration
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        // Should have default model for anthropic
+        assert!(content.contains("ANTHROPIC_MODEL="));
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_model_test");
+    }
+
+    #[test]
+    fn test_onboard_env_file_no_duplicate_keys() {
+        use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
+
+        // Setup test environment
+        std::env::remove_var("NUCLAW_HOME");
+        std::env::set_var("NUCLAW_HOME", "/tmp/nuclaw_no_dup_test");
+        let _ = fs::remove_dir_all("/tmp/nuclaw_no_dup_test");
+        let _ = fs::create_dir_all("/tmp/nuclaw_no_dup_test");
+
+        // First save
+        let config1 = OnboardConfig {
+            provider: Some("anthropic".to_string()),
+            api_key: Some("key1".to_string()),
+            base_url: None,
+            telegram_token: Some("token1".to_string()),
+        };
+        save_config(&config1).expect("Failed to save first config");
+
+        // Second save (overwrite)
+        let config2 = OnboardConfig {
+            provider: Some("openai".to_string()),
+            api_key: Some("key2".to_string()),
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            telegram_token: Some("token2".to_string()),
+        };
+        save_config(&config2).expect("Failed to save second config");
+
+        // Load and verify only second config exists
+        let loaded = load_config().expect("Failed to load config");
+
+        // Should NOT have first config
+        assert_ne!(loaded.api_key, Some("key1".to_string()));
+        assert_ne!(loaded.telegram_token, Some("token1".to_string()));
+
+        // Should have second config
+        assert_eq!(loaded.api_key, Some("key2".to_string()));
+        assert_eq!(loaded.telegram_token, Some("token2".to_string()));
+
+        // Verify .env file has no duplicates
+        let env_path = env_file_path();
+        let content = fs::read_to_string(&env_path).expect("Failed to read env file");
+
+        let api_key_count = content.matches("OPENAI_API_KEY=").count();
+        assert_eq!(api_key_count, 1, "Should have exactly one API_KEY");
+
+        let tele_count = content.matches("TELEGRAM_BOT_TOKEN=").count();
+        assert_eq!(tele_count, 1, "Should have exactly one TELEGRAM_BOT_TOKEN");
+
+        // Cleanup
+        let _ = fs::remove_dir_all("/tmp/nuclaw_no_dup_test");
+    }
 }

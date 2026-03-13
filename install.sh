@@ -223,6 +223,42 @@ EOF
     fi
 }
 
+# 运行配置向导
+run_onboard() {
+    log_step "运行配置向导..."
+    
+    local nuclaw_bin="${NUCLAW_HOME}/nuclaw"
+    
+    if [[ ! -f "$nuclaw_bin" ]]; then
+        log_error "NuClaw 二进制文件未找到"
+        return 1
+    fi
+    
+    echo ""
+    echo "是否现在配置 LLM 和 Telegram? (推荐)"
+    echo "  y - 运行配置向导"
+    echo "  n - 跳过，稍后手动运行 --onboard"
+    echo ""
+    read -p "请选择 [y/n]: " -n 1 -r
+    echo ""
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "启动配置向导..."
+        source "${NUCLAW_HOME}/.env" 2>/dev/null || true
+        "$nuclaw_bin" --onboard
+        
+        echo ""
+        log_info "配置向导已完成!"
+        echo ""
+        echo "如需重新配置,运行: ${nuclaw_bin} --onboard"
+    else
+        log_info "跳过配置向导"
+        echo ""
+        echo "后续可运行以下命令进行配置:"
+        echo "  ${nuclaw_bin} --onboard"
+    fi
+}
+
 # 显示使用说明
 show_usage() {
     echo ""
@@ -235,19 +271,21 @@ show_usage() {
     echo "使用方式:"
     echo "  ${NUCLAW_HOME}/nuclaw              # 启动服务"
     echo "  ${NUCLAW_HOME}/nuclaw --help       # 查看帮助"
-    echo "  ${NUCLAW_HOME}/nuclaw --auth       # 认证流程"
+    echo "  ${NUCLAW_HOME}/nuclaw --onboard    # 配置 LLM 和 Telegram"
+    echo "  ${NUCLAW_HOME}/nuclaw --auth       # WhatsApp 认证"
     echo ""
     echo "目录说明:"
     echo "  ${NUCLAW_HOME}/store/    - SQLite 数据库和认证文件"
     echo "  ${NUCLAW_HOME}/data/     - 运行时数据 (会话、IPC)"
     echo "  ${NUCLAW_HOME}/groups/   - 群组 CLAUDE.md 文件"
     echo "  ${NUCLAW_HOME}/logs/     - 日志文件"
+    echo "  ${NUCLAW_HOME}/.env     - LLM 和 Telegram 配置"
     echo ""
     echo "macOS 开机自启动: 已配置"
     echo ""
-    echo "后续步骤:"
-    echo "  1. 配置 WhatsApp 认证 (设置 WHATSAPP_MCP_URL)"
-    echo "  2. 注册群组"
+    echo "快速开始:"
+    echo "  1. 配置 LLM: ${NUCLAW_HOME}/nuclaw --onboard"
+    echo "  2. 启动服务: ${NUCLAW_HOME}/nuclaw"
     echo ""
 }
 
@@ -279,6 +317,9 @@ main() {
 
     setup_directories
     create_initial_config
+
+    # 运行配置向导
+    run_onboard
 
     # macOS 启动配置
     if [[ "$os" == "macOS" ]]; then
