@@ -159,3 +159,8 @@ mod tests {
         std::env::remove_var("CLAUDE_MODEL");
     }
 }
+
+/// Skills directory for external skill definitions
+pub fn skills_dir() -> PathBuf {
+    nuclaw_home().join("skills")
+}

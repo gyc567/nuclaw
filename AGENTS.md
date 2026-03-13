@@ -285,3 +285,97 @@ pub fn config_function() -> ReturnType {
 3. Run `cargo fmt` - ensure formatting
 4. Run `cargo test` - all tests pass
 5. Review changes - minimal, focused commits
+
+## Additional Patterns
+
+### Rust API Service Patterns
+
+For reference when building API services with Rust:
+
+#### Critical Rules
+
+- Use `thiserror` for library errors, `anyhow` only in binary crates or tests
+- No `.unwrap()` or `.expect()` in production code — propagate errors with `?`
+- Prefer `&str` over `String` in function parameters; return `String` when ownership transfers
+- Use `clippy` with `#![deny(clippy::all, clippy::pedantic)]` — fix all warnings
+- Derive `Debug` on all public types; derive `Clone`, `PartialEq` only when needed
+- No `unsafe` blocks unless justified with a `// SAFETY:` comment
+
+#### Database Patterns
+
+- All queries use SQLx with `query!` or `query_as!` macros
+- Use migrations in `migrations/` using `sqlx migrate` — never alter database directly
+- Use `sqlx::Pool<Postgres>` as shared state — never create connections per request
+- All queries use parameterized placeholders (`$1`, `$2`) — never string formatting
+
+```rust
+// BAD: String interpolation (SQL injection risk)
+let q = format!("SELECT * FROM users WHERE id = '{}'", id);
+
+// GOOD: Parameterized query, compile-time checked
+let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = $1", id)
+    .fetch_optional(&pool)
+    .await?;
+```
+
+#### Error Handling
+
+```rust
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("Resource not found")]
+    NotFound,
+    #[error("Validation failed: {0}")]
+    Validation(String),
+    #[error("Unauthorized")]
+    Unauthorized,
+    #[error(transparent)]
+    Internal(#[from] anyhow::Error),
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, message) = match &self {
+            Self::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
+            Self::Validation(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string()),
+            Self::Internal(err) => {
+                tracing::error!(?err, "internal error");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".into())
+            }
+        };
+        (status, Json(json!({ "error": message }))).into_response()
+    }
+}
+```
+
+#### Layered Architecture
+
+```
+src/
+├── main.rs              # Entrypoint, server setup
+├── lib.rs               # Re-exports
+├── config.rs            # Environment config
+├── router.rs            # Axum router
+├── middleware/          # Auth, logging, etc.
+├── handlers/            # Route handlers (thin)
+├── services/            # Business logic
+├── repositories/        # Database access
+└── domain/              # Domain types, errors
+```
+
+#### Testing Strategy
+
+- Unit tests in `#[cfg(test)]` modules
+- Integration tests in `tests/` directory
+- Use `#[sqlx::test]` for database tests
+- Mock external services with `mockall`
+
+#### Code Style
+
+- Max line length: 100 characters (rustfmt)
+- Group imports: `std` → external → `crate`
+- Modules: one file per module
+- Types: PascalCase, functions: snake_case, constants: UPPER_SNAKE_CASE

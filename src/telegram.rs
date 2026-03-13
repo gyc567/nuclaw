@@ -4,7 +4,7 @@
 //! Follows OpenClaw Telegram specification for message handling.
 
 use crate::config::{assistant_name, data_dir};
-use crate::container_runner::run_container;
+use crate::container_runner::{container_timeout, run_container};
 use crate::db::Database;
 use crate::error::{NuClawError, Result};
 use crate::types::{ContainerInput, NewMessage, RegisteredGroup, RouterState};
@@ -137,6 +137,33 @@ pub struct TelegramClient {
     db: Database,
     /// Assistant name for trigger detection
     assistant_name: String,
+}
+
+async fn telegram_send_single_message(api_url: &str, chat_id: i64, text: &str) -> Result<()> {
+    let payload = serde_json::json!({
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML"
+    });
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/sendMessage", api_url))
+        .json(&payload)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| NuClawError::Telegram {
+            message: format!("Failed to send message: {}", e),
+        })?;
+
+    if !response.status().is_success() {
+        let error = response.text().await.unwrap_or_default();
+        return Err(NuClawError::Telegram {
+            message: format!("Failed to send message: {}", error),
+        });
+    }
+
+    Ok(())
 }
 
 impl TelegramClient {
@@ -284,7 +311,7 @@ impl TelegramClient {
 
         let chat_jid = format!("telegram:group:{}", msg.chat.id);
 
-        let content = msg.text.clone().unwrap_or_else(|| "".to_string());
+        let content = msg.text.clone().unwrap_or_default();
 
         Ok(NewMessage {
             id: msg.message_id.to_string(),
@@ -304,14 +331,21 @@ impl TelegramClient {
         }
 
         self.update_router_state(msg).await;
-        self.store_message(msg).await?;
+
+        let db = Arc::new(self.db.clone());
+        let msg_clone = msg.clone();
+        tokio::spawn(async move {
+            if let Err(e) = Self::store_message_background(&db, &msg_clone).await {
+                error!("Failed to store message: {}", e);
+            }
+        });
 
         // Check if it's a private message
-        if msg.chat_jid.starts_with("telegram:group:-") || !msg.chat_jid.contains(":group:") {
-            if !self.check_dm_policy(&msg.sender).await? {
-                debug!("Message from unauthorized user: {}", msg.sender);
-                return Ok(None);
-            }
+        if (msg.chat_jid.starts_with("telegram:group:-") || !msg.chat_jid.contains(":group:"))
+            && !self.check_dm_policy(&msg.sender).await?
+        {
+            debug!("Message from unauthorized user: {}", msg.sender);
+            return Ok(None);
         }
 
         // Check if registered group
@@ -348,7 +382,7 @@ impl TelegramClient {
             is_scheduled_task: false,
         };
 
-        let result = timeout(Duration::from_secs(300), run_container(input)).await;
+        let result = timeout(container_timeout(), run_container(input)).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -382,30 +416,22 @@ impl TelegramClient {
         })?;
 
         let chunks = self.chunk_text(text);
+        let api_url = self.api_url.clone();
 
+        let mut handles = Vec::new();
         for chunk in chunks {
-            let payload = serde_json::json!({
-                "chat_id": cid,
-                "text": chunk,
-                "parse_mode": "HTML"
-            });
+            let api_url = api_url.clone();
+            let handle =
+                tokio::spawn(
+                    async move { telegram_send_single_message(&api_url, cid, &chunk).await },
+                );
+            handles.push(handle);
+        }
 
-            let response = reqwest::Client::new()
-                .post(&format!("{}/sendMessage", self.api_url))
-                .json(&payload)
-                .timeout(Duration::from_secs(30))
-                .send()
-                .await
-                .map_err(|e| NuClawError::Telegram {
-                    message: format!("Failed to send message: {}", e),
-                })?;
-
-            if !response.status().is_success() {
-                let error = response.text().await.unwrap_or_default();
-                return Err(NuClawError::Telegram {
-                    message: format!("Failed to send message: {}", error),
-                });
-            }
+        for handle in handles {
+            handle.await.map_err(|e| NuClawError::Telegram {
+                message: format!("Join error: {}", e),
+            })??;
         }
 
         Ok(())
@@ -485,8 +511,11 @@ impl TelegramClient {
             .last_agent_timestamp
             .insert(msg.chat_jid.clone(), msg.timestamp.clone());
 
-        let state_path = data_dir().join("router_state.json");
-        let _ = save_json(&state_path, &self.router_state);
+        let router_state = self.router_state.clone();
+        tokio::spawn(async move {
+            let state_path = data_dir().join("router_state.json");
+            let _ = save_json(&state_path, &router_state);
+        });
     }
 
     /// Store message in database
@@ -497,6 +526,30 @@ impl TelegramClient {
             .map_err(|e| NuClawError::Database {
                 message: e.to_string(),
             })?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![
+                msg.id,
+                msg.chat_jid,
+                msg.sender,
+                msg.sender_name,
+                msg.content,
+                msg.timestamp,
+                if msg.id.starts_with("self") { 1 } else { 0 },
+            ],
+        ).map_err(|e| NuClawError::Database {
+            message: format!("Failed to store message: {}", e),
+        })?;
+
+        Ok(())
+    }
+
+    async fn store_message_background(db: &Database, msg: &NewMessage) -> Result<()> {
+        let conn = db.get_connection().map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
 
         conn.execute(
             "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
@@ -587,7 +640,7 @@ pub fn chunk_text_pure(text: &str, chunk_limit: usize) -> Vec<String> {
 
     for paragraph in text.split("\n\n") {
         let para = paragraph;
-        
+
         // If paragraph itself exceeds limit, split it
         if para.len() > chunk_limit {
             // Push current chunk if not empty
@@ -595,7 +648,7 @@ pub fn chunk_text_pure(text: &str, chunk_limit: usize) -> Vec<String> {
                 chunks.push(current);
                 current = String::new();
             }
-            
+
             // Split long paragraph
             let mut remaining = para;
             while !remaining.is_empty() {
@@ -739,8 +792,8 @@ mod tests {
     use super::*;
 
     fn setup_test_dirs() {
-        use std::fs;
         use crate::config::store_dir;
+        use std::fs;
         let store = store_dir();
         if !store.exists() {
             let _ = fs::create_dir_all(&store);

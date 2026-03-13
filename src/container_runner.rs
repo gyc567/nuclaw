@@ -10,7 +10,10 @@
 //! - Configurable timeout
 //! - Output parsing with sentinel markers
 
-use crate::config::{anthropic_api_key, anthropic_base_url, assistant_name, claude_model, data_dir, groups_dir, logs_dir};
+use crate::config::{
+    anthropic_api_key, anthropic_base_url, assistant_name, claude_model, data_dir, groups_dir,
+    logs_dir,
+};
 use crate::error::{NuClawError, Result};
 use crate::types::{ContainerInput, ContainerOutput};
 use std::fs;
@@ -19,6 +22,7 @@ use std::process::Command;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdout, Command as AsyncCommand};
 use tokio::time::{timeout, Duration, Instant};
+use tracing::{info, warn};
 
 /// Default container timeout: 5 minutes
 const DEFAULT_TIMEOUT_MS: u64 = 300_000;
@@ -167,19 +171,19 @@ async fn build_container_command(
             .arg(format!("{}:/workspace/group", group_dir.display()))
             .arg("-e")
             .arg("CLAUDE_CODE_OAUTH_TOKEN");
-        
+
         if anthropic_api_key().is_some() {
             cmd.arg("-e").arg("ANTHROPIC_API_KEY");
         }
-        
+
         if anthropic_base_url().is_some() {
             cmd.arg("-e").arg("ANTHROPIC_BASE_URL");
         }
-        
+
         if claude_model().is_some() {
             cmd.arg("-e").arg("CLAUDE_MODEL");
         }
-        
+
         cmd.arg("--entrypoint")
             .arg("/bin/sh")
             .arg(image)
@@ -637,5 +641,398 @@ mod tests {
         // Cleanup
         let log_dir = logs_dir().join("test_log_error_group");
         let _ = fs::remove_dir_all(&log_dir);
+    }
+}
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+const DEFAULT_POOL_MIN_SIZE: usize = 2;
+const DEFAULT_POOL_MAX_SIZE: usize = 5;
+const CONTAINER_NAME_PREFIX: &str = "nuclaw-pool-";
+
+#[derive(Debug, Clone)]
+struct PooledContainerInner {
+    container_id: String,
+    group_folder: String,
+    in_use: bool,
+}
+
+#[derive(Clone)]
+pub struct PooledContainer {
+    inner: Arc<Mutex<PooledContainerInner>>,
+    pool: Arc<ContainerPool>,
+}
+
+impl PooledContainer {
+    pub async fn run(mut self, mut input: ContainerInput) -> Result<ContainerOutput> {
+        let (container_id, group_folder) = {
+            let inner = self.inner.lock().await;
+            (inner.container_id.clone(), inner.group_folder.clone())
+        };
+
+        let result = run_container_in_pool(&container_id, &group_folder, &mut input).await;
+
+        {
+            let mut inner = self.inner.lock().await;
+            inner.in_use = false;
+        }
+
+        result
+    }
+}
+
+impl Clone for ContainerPool {
+    fn clone(&self) -> Self {
+        Self {
+            containers: Arc::clone(&self.containers),
+            max_size: self.max_size,
+            min_size: self.min_size,
+            enabled: self.enabled,
+        }
+    }
+}
+
+pub struct ContainerPool {
+    pub containers: Arc<Mutex<HashMap<String, PooledContainerInner>>>,
+    pub max_size: usize,
+    pub min_size: usize,
+    pub enabled: bool,
+}
+
+impl ContainerPool {
+    pub fn new() -> Self {
+        let enabled = std::env::var("CONTAINER_POOL_ENABLED")
+            .map(|v| v == "true")
+            .unwrap_or(false);
+
+        let max_size = std::env::var("CONTAINER_POOL_MAX_SIZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_POOL_MAX_SIZE);
+
+        let min_size = std::env::var("CONTAINER_POOL_MIN_SIZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_POOL_MIN_SIZE);
+
+        Self {
+            containers: Arc::new(Mutex::new(HashMap::new())),
+            max_size,
+            min_size,
+            enabled,
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub async fn warmup(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        info!(
+            "Container pool warming up with {} containers...",
+            self.min_size
+        );
+
+        for i in 0..self.min_size {
+            let container_id = format!("{}{}", CONTAINER_NAME_PREFIX, i);
+            match start_pooled_container(&container_id, "default").await {
+                Ok(_) => {
+                    let mut containers = self.containers.lock().await;
+                    containers.insert(
+                        container_id.clone(),
+                        PooledContainerInner {
+                            container_id,
+                            group_folder: "default".to_string(),
+                            in_use: false,
+                        },
+                    );
+                    info!("Warm container {} started", i);
+                }
+                Err(e) => {
+                    warn!("Failed to warm container {}: {}", i, e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn acquire(&self, group_folder: &str) -> Option<PooledContainer> {
+        if !self.enabled {
+            return None;
+        }
+
+        {
+            let mut containers = self.containers.lock().await;
+
+            for (id, container) in containers.iter_mut() {
+                if !container.in_use && container.group_folder == group_folder {
+                    container.in_use = true;
+                    return Some(PooledContainer {
+                        inner: Arc::new(Mutex::new(container.clone())),
+                        pool: Arc::new(self.clone()),
+                    });
+                }
+            }
+
+            if containers.len() < self.max_size {
+                let new_id = format!("{}{}", CONTAINER_NAME_PREFIX, containers.len());
+                drop(containers);
+
+                if start_pooled_container(&new_id, group_folder).await.is_ok() {
+                    let mut containers = self.containers.lock().await;
+                    containers.insert(
+                        new_id.clone(),
+                        PooledContainerInner {
+                            container_id: new_id.clone(),
+                            group_folder: group_folder.to_string(),
+                            in_use: true,
+                        },
+                    );
+                    return Some(PooledContainer {
+                        inner: Arc::new(Mutex::new(PooledContainerInner {
+                            container_id: new_id,
+                            group_folder: group_folder.to_string(),
+                            in_use: true,
+                        })),
+                        pool: Arc::new(self.clone()),
+                    });
+                }
+            }
+        }
+
+        None
+    }
+
+    pub async fn release(&self, container_id: &str) {
+        if !self.enabled {
+            return;
+        }
+
+        let mut containers = self.containers.lock().await;
+        if let Some(container) = containers.get_mut(container_id) {
+            container.in_use = false;
+        }
+    }
+}
+
+impl Default for ContainerPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+async fn start_pooled_container(container_id: &str, group_folder: &str) -> Result<()> {
+    let cmd = get_container_command();
+    let group_dir = prepare_group_context(group_folder)?;
+    let image = std::env::var("CONTAINER_IMAGE")
+        .unwrap_or_else(|_| "anthropic/claude-code:latest".to_string());
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new(cmd)
+            .args([
+                "run",
+                "--name",
+                container_id,
+                "--workspace",
+                &group_dir.to_string_lossy(),
+            ])
+            .output()
+            .map_err(|e| NuClawError::Container {
+                message: format!("Failed to start container: {}", e),
+            })?;
+
+        if !output.status.success() {
+            return Err(NuClawError::Container {
+                message: format!(
+                    "Container start failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            });
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut cmd = Command::new(cmd);
+        cmd.arg("run")
+            .arg("--name")
+            .arg(container_id)
+            .arg("-d")
+            .arg("-v")
+            .arg(format!("{}:/workspace/group", group_dir.display()))
+            .arg("-e")
+            .arg("CLAUDE_CODE_OAUTH_TOKEN");
+
+        if anthropic_api_key().is_some() {
+            cmd.arg("-e").arg("ANTHROPIC_API_KEY");
+        }
+        if anthropic_base_url().is_some() {
+            cmd.arg("-e").arg("ANTHROPIC_BASE_URL");
+        }
+        if claude_model().is_some() {
+            cmd.arg("-e").arg("CLAUDE_MODEL");
+        }
+
+        cmd.arg("--entrypoint")
+            .arg("sleep")
+            .arg(image)
+            .arg("infinity");
+
+        let output = cmd.output().map_err(|e| NuClawError::Container {
+            message: format!("Failed to start container: {}", e),
+        })?;
+
+        if !output.status.success() {
+            return Err(NuClawError::Container {
+                message: format!(
+                    "Container start failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_container_in_pool(
+    container_id: &str,
+    group_folder: &str,
+    input: &mut ContainerInput,
+) -> Result<ContainerOutput> {
+    write_ipc_files(group_folder, input)?;
+
+    let input_path = data_dir().join("temp").join(format!(
+        "input_{}.json",
+        input
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "default".to_string())
+    ));
+
+    let input_json = serde_json::to_string(input).map_err(|e| NuClawError::Container {
+        message: format!("Failed to serialize input: {}", e),
+    })?;
+    std::fs::write(&input_path, &input_json).map_err(|e| NuClawError::FileSystem {
+        message: format!("Failed to write input file: {}", e),
+    })?;
+
+    let cmd = get_container_command();
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new(cmd)
+            .args([
+                "exec",
+                "--workspace",
+                group_folder,
+                "--input",
+                &input_path.to_string_lossy(),
+            ])
+            .arg("--name")
+            .arg(assistant_name())
+            .output()
+            .map_err(|e| NuClawError::Container {
+                message: format!("Failed to execute container: {}", e),
+            })?;
+
+        let _ = std::fs::remove_file(&input_path);
+
+        parse_container_output(
+            &String::from_utf8_lossy(&output.stdout),
+            output.status.success(),
+            0,
+        )
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let output = Command::new(cmd)
+            .arg("exec")
+            .arg("-i")
+            .arg(container_id)
+            .arg("/bin/sh")
+            .arg("-c")
+            .arg(format!("cat /workspace/input.json | /usr/local/bin/claude"))
+            .output()
+            .map_err(|e| NuClawError::Container {
+                message: format!("Failed to execute container: {}", e),
+            })?;
+
+        let _ = std::fs::remove_file(&input_path);
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined = format!("{}\n{}", stdout, stderr);
+        parse_container_output(&combined, output.status.success(), 0)
+    }
+}
+
+#[cfg(test)]
+mod container_pool_tests {
+    use super::*;
+
+    #[test]
+    fn test_container_pool_default_disabled() {
+        let pool = ContainerPool::new();
+        assert!(!pool.is_enabled());
+    }
+
+    #[test]
+    fn test_container_pool_enabled_from_env() {
+        std::env::set_var("CONTAINER_POOL_ENABLED", "true");
+        let pool = ContainerPool::new();
+        assert!(pool.is_enabled());
+        std::env::remove_var("CONTAINER_POOL_ENABLED");
+    }
+
+    #[test]
+    fn test_container_pool_max_size_from_env() {
+        std::env::set_var("CONTAINER_POOL_MAX_SIZE", "10");
+        let pool = ContainerPool::new();
+        assert_eq!(pool.max_size, 10);
+        std::env::remove_var("CONTAINER_POOL_MAX_SIZE");
+    }
+
+    #[test]
+    fn test_container_pool_min_size_from_env() {
+        std::env::set_var("CONTAINER_POOL_MIN_SIZE", "5");
+        let pool = ContainerPool::new();
+        assert_eq!(pool.min_size, 5);
+        std::env::remove_var("CONTAINER_POOL_MIN_SIZE");
+    }
+
+    #[test]
+    fn test_container_pool_default_values() {
+        std::env::remove_var("CONTAINER_POOL_ENABLED");
+        std::env::remove_var("CONTAINER_POOL_MAX_SIZE");
+        std::env::remove_var("CONTAINER_POOL_MIN_SIZE");
+
+        let pool = ContainerPool::new();
+
+        assert!(!pool.is_enabled());
+        assert_eq!(pool.max_size, 5);
+        assert_eq!(pool.min_size, 2);
+    }
+
+    #[tokio::test]
+    async fn test_container_pool_acquire_returns_none_when_disabled() {
+        let pool = ContainerPool::new();
+        let result = pool.acquire("test_group").await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_container_pool_release_noop_when_disabled() {
+        let pool = ContainerPool::new();
+        pool.release("any_id").await;
     }
 }

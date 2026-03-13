@@ -3,12 +3,14 @@
 //! Provides WhatsApp connectivity via external WhatsApp MCP Server or HTTP API.
 
 use crate::config::{assistant_name, data_dir, store_dir};
-use crate::container_runner::run_container;
+use crate::container_runner::{container_timeout, run_container};
 use crate::db::Database;
 use crate::error::{NuClawError, Result};
 use crate::types::{ContainerInput, NewMessage, RegisteredGroup, RouterState};
 use crate::utils::json::{load_json, save_json};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info};
 
@@ -160,7 +162,14 @@ impl WhatsAppClient {
         }
 
         self.update_router_state(msg).await;
-        self.store_message(msg).await?;
+
+        let db = Arc::new(self.db.clone());
+        let msg_clone = msg.clone();
+        tokio::spawn(async move {
+            if let Err(e) = Self::store_message_background(&db, &msg_clone).await {
+                error!("Failed to store message: {}", e);
+            }
+        });
 
         if !self.is_registered_group(&msg.chat_jid).await {
             debug!("Message from unregistered group: {}", msg.chat_jid);
@@ -195,7 +204,7 @@ impl WhatsAppClient {
             is_scheduled_task: false,
         };
 
-        let result = timeout(Duration::from_secs(300), run_container(input)).await;
+        let result = timeout(container_timeout(), run_container(input)).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -272,8 +281,11 @@ impl WhatsAppClient {
             .last_agent_timestamp
             .insert(msg.chat_jid.clone(), msg.timestamp.clone());
 
-        let state_path = data_dir().join("router_state.json");
-        let _ = save_json(&state_path, &self.router_state);
+        let router_state = self.router_state.clone();
+        tokio::spawn(async move {
+            let state_path = data_dir().join("router_state.json");
+            let _ = save_json(&state_path, &router_state);
+        });
     }
 
     /// Store message in database
@@ -284,6 +296,30 @@ impl WhatsAppClient {
             .map_err(|e| NuClawError::Database {
                 message: e.to_string(),
             })?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![
+                msg.id,
+                msg.chat_jid,
+                msg.sender,
+                msg.sender_name,
+                msg.content,
+                msg.timestamp,
+                if msg.id.starts_with("self") { 1 } else { 0 },
+            ],
+        ).map_err(|e| NuClawError::Database {
+            message: format!("Failed to store message: {}", e),
+        })?;
+
+        Ok(())
+    }
+
+    async fn store_message_background(db: &Database, msg: &NewMessage) -> Result<()> {
+        let conn = db.get_connection().map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
 
         conn.execute(
             "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
@@ -410,8 +446,8 @@ mod tests {
     use super::*;
 
     fn setup_test_dirs() {
-        use std::fs;
         use crate::config::store_dir;
+        use std::fs;
         let store = store_dir();
         if !store.exists() {
             let _ = fs::create_dir_all(&store);

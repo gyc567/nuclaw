@@ -164,7 +164,7 @@ mod tests {
         let registry = ChannelRegistry::new();
         registry.register(MockChannel::new("enabled", true));
         registry.register(MockChannel::new("disabled", false));
-        
+
         assert!(registry.is_enabled("enabled"));
         assert!(!registry.is_enabled("disabled"));
     }
@@ -174,7 +174,7 @@ mod tests {
         let registry = ChannelRegistry::new();
         registry.register(MockChannel::new("test", true));
         assert!(registry.is_registered("test"));
-        
+
         registry.unregister("test");
         assert!(!registry.is_registered("test"));
     }

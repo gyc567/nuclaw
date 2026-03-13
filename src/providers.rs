@@ -276,7 +276,8 @@ impl Provider for AnthropicProvider {
     }
 
     async fn chat(&self, message: &str, model: &str, temperature: f64) -> Result<String> {
-        self.chat_with_system(None, message, model, temperature).await
+        self.chat_with_system(None, message, model, temperature)
+            .await
     }
 
     async fn chat_with_system(
@@ -286,7 +287,11 @@ impl Provider for AnthropicProvider {
         model: &str,
         temperature: f64,
     ) -> Result<String> {
-        let model = if model.is_empty() { &self.default_model } else { model };
+        let model = if model.is_empty() {
+            &self.default_model
+        } else {
+            model
+        };
 
         #[derive(serde::Serialize)]
         struct Request {
@@ -331,7 +336,7 @@ impl Provider for AnthropicProvider {
             let body = response.text().await.unwrap_or_default();
             return Err(NuClawError::Api {
                 message: format!("API error {}: {}", status, body),
-            }.into());
+            });
         }
 
         #[derive(serde::Deserialize)]
@@ -344,19 +349,16 @@ impl Provider for AnthropicProvider {
             text: Option<String>,
         }
 
-        let resp: Response = response
-            .json()
-            .await
-            .map_err(|e| NuClawError::Api {
-                message: format!("Failed to parse response: {}", e),
-            })?;
+        let resp: Response = response.json().await.map_err(|e| NuClawError::Api {
+            message: format!("Failed to parse response: {}", e),
+        })?;
 
         resp.content
             .into_iter()
             .find_map(|c| c.text)
             .ok_or_else(|| NuClawError::Api {
                 message: "No text in response".to_string(),
-            }.into())
+            })
     }
 
     fn context_window(&self) -> usize {
@@ -393,7 +395,8 @@ impl Provider for OpenAIProvider {
     }
 
     async fn chat(&self, message: &str, model: &str, temperature: f64) -> Result<String> {
-        self.chat_with_system(None, message, model, temperature).await
+        self.chat_with_system(None, message, model, temperature)
+            .await
     }
 
     async fn chat_with_system(
@@ -403,7 +406,11 @@ impl Provider for OpenAIProvider {
         model: &str,
         temperature: f64,
     ) -> Result<String> {
-        let model = if model.is_empty() { &self.default_model } else { model };
+        let model = if model.is_empty() {
+            &self.default_model
+        } else {
+            model
+        };
 
         #[derive(serde::Serialize)]
         struct Request {
@@ -452,7 +459,7 @@ impl Provider for OpenAIProvider {
             let body = response.text().await.unwrap_or_default();
             return Err(NuClawError::Api {
                 message: format!("API error {}: {}", status, body),
-            }.into());
+            });
         }
 
         #[derive(serde::Deserialize)]
@@ -470,12 +477,9 @@ impl Provider for OpenAIProvider {
             content: String,
         }
 
-        let resp: Response = response
-            .json()
-            .await
-            .map_err(|e| NuClawError::Api {
-                message: format!("Failed to parse response: {}", e),
-            })?;
+        let resp: Response = response.json().await.map_err(|e| NuClawError::Api {
+            message: format!("Failed to parse response: {}", e),
+        })?;
 
         resp.choices
             .into_iter()
@@ -483,7 +487,7 @@ impl Provider for OpenAIProvider {
             .map(|c| c.message.content)
             .ok_or_else(|| NuClawError::Api {
                 message: "No choices in response".to_string(),
-            }.into())
+            })
     }
 
     fn context_window(&self) -> usize {
@@ -666,5 +670,62 @@ mod tests {
     fn test_provider_registry_function() {
         let registry = provider_registry();
         assert!(!registry.list_specs().is_empty());
+    }
+
+    #[test]
+    fn test_chat_message_system() {
+        let msg = ChatMessage::system("You are a helpful assistant");
+        assert_eq!(msg.role, "system");
+        assert_eq!(msg.content, "You are a helpful assistant");
+    }
+
+    #[test]
+    fn test_chat_message_user() {
+        let msg = ChatMessage::user("Hello");
+        assert_eq!(msg.role, "user");
+        assert_eq!(msg.content, "Hello");
+    }
+
+    #[test]
+    fn test_chat_message_assistant() {
+        let msg = ChatMessage::assistant("Hi there");
+        assert_eq!(msg.role, "assistant");
+        assert_eq!(msg.content, "Hi there");
+    }
+
+    #[test]
+    fn test_chat_response_has_text_true() {
+        let resp = ChatResponse {
+            text: Some("hello".to_string()),
+        };
+        assert!(resp.has_text());
+    }
+
+    #[test]
+    fn test_chat_response_has_text_false_empty() {
+        let resp = ChatResponse {
+            text: Some("".to_string()),
+        };
+        assert!(!resp.has_text());
+    }
+
+    #[test]
+    fn test_chat_response_has_text_false_none() {
+        let resp = ChatResponse { text: None };
+        assert!(!resp.has_text());
+    }
+
+    #[test]
+    fn test_chat_response_text_or_empty() {
+        let resp = ChatResponse {
+            text: Some("test".to_string()),
+        };
+        assert_eq!(resp.text_or_empty(), "test");
+    }
+
+    #[test]
+    fn test_chat_response_text_or_empty_none() {
+        let resp = ChatResponse { text: None };
+        assert_eq!(resp.text_or_empty(), "");
     }
 }

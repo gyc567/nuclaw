@@ -524,8 +524,8 @@ mod tests {
     use super::*;
 
     fn setup_test_dirs() {
-        use std::fs;
         use crate::config::store_dir;
+        use std::fs;
         let store = store_dir();
         if !store.exists() {
             let _ = fs::create_dir_all(&store);

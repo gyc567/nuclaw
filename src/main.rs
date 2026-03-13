@@ -8,10 +8,11 @@
 //! - SQLite persistence
 
 use nuclaw::config;
-use nuclaw::container_runner::{self, ensure_container_system_running};
+use nuclaw::container_runner::ensure_container_system_running;
 use nuclaw::db;
 use nuclaw::error::{NuClawError, Result};
 use nuclaw::logging;
+use nuclaw::onboard;
 use nuclaw::task_scheduler::TaskScheduler;
 use nuclaw::telegram;
 use nuclaw::whatsapp;
@@ -33,6 +34,9 @@ struct Args {
 
     #[structopt(long)]
     telegram: bool,
+
+    #[structopt(long)]
+    onboard: bool,
 }
 
 #[tokio::main]
@@ -69,6 +73,9 @@ async fn main() -> Result<()> {
     } else if args.auth {
         // Show authentication QR code
         run_auth_flow().await?;
+    } else if args.onboard {
+        // Run onboard wizard
+        onboard::run_onboard()?;
     } else {
         // Default: run main application with all features
         run_main_application(db).await?;

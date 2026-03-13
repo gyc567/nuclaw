@@ -19,6 +19,7 @@ pub mod logging;
 pub mod maintenance;
 pub mod memory;
 pub mod observer;
+pub mod onboard;
 pub mod providers;
 pub mod security;
 pub mod skills;
@@ -29,7 +30,7 @@ pub mod utils;
 pub mod whatsapp;
 
 // Re-exports for convenience
-pub use agent_runner::{create_runner, agent_runner_mode, AgentRunner, AgentRunnerMode};
+pub use agent_runner::{agent_runner_mode, create_runner, AgentRunner, AgentRunnerMode};
 pub use channels::{Channel, ChannelRegistry};
 pub use config::ensure_directories;
 pub use container_runner::{
@@ -37,6 +38,7 @@ pub use container_runner::{
     max_output_size, run_container,
 };
 pub use error::{NuClawError, Result};
+pub use onboard::{load_config, print_config_status, run_onboard, save_config};
 pub use providers::{ProviderConfig, ProviderRegistry, ProviderSpec, PROVIDERS};
 pub use skills::{Skill, SkillRegistry};
 pub use task_scheduler::TaskScheduler;

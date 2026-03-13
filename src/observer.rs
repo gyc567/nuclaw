@@ -89,7 +89,7 @@ impl LogObserver {
             LogLevel::Warn => 3,
             LogLevel::Error => 4,
         };
-        
+
         let min_value = match self.min_level {
             LogLevel::Trace => 0,
             LogLevel::Debug => 1,
@@ -97,7 +97,7 @@ impl LogObserver {
             LogLevel::Warn => 3,
             LogLevel::Error => 4,
         };
-        
+
         level_value >= min_value
     }
 }
@@ -201,7 +201,7 @@ mod tests {
     fn test_log_entry_with_fields() {
         let entry = LogEntry::new(LogLevel::Info, "test", "message")
             .with_fields(serde_json::json!({"key": "value"}));
-        
+
         assert!(entry.fields.is_some());
     }
 
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn test_log_observer_should_log() {
         let observer = LogObserver::new(LogLevel::Info);
-        
+
         assert!(!observer.should_log(&LogLevel::Trace));
         assert!(!observer.should_log(&LogLevel::Debug));
         assert!(observer.should_log(&LogLevel::Info));
@@ -252,5 +252,37 @@ mod tests {
         let mut observer = MultiObserver::new();
         observer.add(Arc::new(NoopObserver));
         assert!(!observer.observers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_multi_observer_observe_forwards() {
+        let mut observer = MultiObserver::new();
+        observer.add(Arc::new(NoopObserver));
+        let entry = LogEntry::new(LogLevel::Info, "test", "message");
+        observer.observe(entry).await;
+    }
+
+    #[test]
+    fn test_log_level_unknown_returns_info() {
+        assert_eq!(LogLevel::from_str("unknown"), LogLevel::Info);
+        assert_eq!(LogLevel::from_str(""), LogLevel::Info);
+    }
+
+    #[test]
+    fn test_log_level_case_insensitive() {
+        assert_eq!(LogLevel::from_str("DEBUG"), LogLevel::Debug);
+        assert_eq!(LogLevel::from_str("Debug"), LogLevel::Debug);
+        assert_eq!(LogLevel::from_str("dEbUg"), LogLevel::Debug);
+    }
+
+    #[test]
+    fn test_log_observer_should_log_all_levels() {
+        let observer = LogObserver::new(LogLevel::Trace);
+
+        assert!(observer.should_log(&LogLevel::Trace));
+        assert!(observer.should_log(&LogLevel::Debug));
+        assert!(observer.should_log(&LogLevel::Info));
+        assert!(observer.should_log(&LogLevel::Warn));
+        assert!(observer.should_log(&LogLevel::Error));
     }
 }

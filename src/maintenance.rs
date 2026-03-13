@@ -28,7 +28,7 @@ impl ContentArchiver {
     }
 
     pub fn should_archive(&self, path: &Path) -> bool {
-        if !path.file_name().map_or(false, |n| n == "MEMORY.md") {
+        if path.file_name().is_none_or(|n| n != "MEMORY.md") {
             return false;
         }
 
@@ -116,10 +116,8 @@ impl LogCleaner {
         if let Ok(entries) = fs::read_dir(&self.log_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if self.should_delete(&path) {
-                    if fs::remove_file(&path).is_ok() {
-                        deleted_count += 1;
-                    }
+                if self.should_delete(&path) && fs::remove_file(&path).is_ok() {
+                    deleted_count += 1;
                 }
             }
         }

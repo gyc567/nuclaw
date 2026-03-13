@@ -1,11 +1,17 @@
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
+
+use crate::config::skills_dir;
 
 #[derive(Debug, Clone)]
 pub struct Skill {
     pub name: String,
     pub description: String,
     pub content: String,
+    /// Optional path to skill directory (for bundled resources)
+    pub path: Option<std::path::PathBuf>,
 }
 
 impl Skill {
@@ -18,7 +24,62 @@ impl Skill {
             name: name.into(),
             description: description.into(),
             content: content.into(),
+            path: None,
         }
+    }
+
+    /// Create a skill from a directory containing SKILL.md
+    pub fn from_directory(dir: &Path) -> Option<Self> {
+        let skill_md = dir.join("SKILL.md");
+        if !skill_md.exists() {
+            return None;
+        }
+
+        let content = fs::read_to_string(&skill_md).ok()?;
+        let name = dir.file_name()?.to_str()?.to_string();
+
+        // Parse YAML frontmatter for name and description
+        let (description, body) = parse_skill_md(&content);
+
+        Some(Self {
+            name,
+            description,
+            content: body,
+            path: Some(dir.to_path_buf()),
+        })
+    }
+}
+
+/// Parse SKILL.md to extract YAML frontmatter and body
+fn parse_skill_md(content: &str) -> (String, String) {
+    if !content.starts_with("---") {
+        // No frontmatter, use first line as description
+        let lines: Vec<&str> = content.lines().collect();
+        let description = lines.first().unwrap_or(&"").to_string();
+        return (description, content.to_string());
+    }
+
+    // Find closing ---
+    if let Some(end_idx) = content[3..].find("---") {
+        let frontmatter = &content[3..3 + end_idx];
+        let body = content[3 + end_idx + 3..].trim_start().to_string();
+
+        // Parse name and description from frontmatter
+        let mut name = String::new();
+        let mut description = String::new();
+
+        for line in frontmatter.lines() {
+            let line = line.trim();
+            if let Some(stripped) = line.strip_prefix("name:") {
+                name = stripped.trim().to_string();
+            } else if let Some(stripped) = line.strip_prefix("description:") {
+                description = stripped.trim().to_string();
+            }
+        }
+
+        (description, body)
+    } else {
+        (String::new(), content.to_string())
     }
 }
 
@@ -37,6 +98,7 @@ impl BuiltinSkillRegistry {
     pub fn new() -> Self {
         let mut registry = Self::default();
         registry.register_builtin_skills();
+        registry.load_external_skills();
         registry
     }
 
@@ -98,8 +160,35 @@ Use the memory system to persist and retrieve information across sessions."#,
         ));
     }
 
+    /// Load external skills from ~/.nuclaw/skills/
+    fn load_external_skills(&mut self) {
+        let skills_path = skills_dir();
+        if !skills_path.exists() {
+            return;
+        }
+
+        if let Ok(entries) = fs::read_dir(&skills_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(skill) = Skill::from_directory(&path) {
+                        // Don't override builtin skills
+                        if !self.skills.contains_key(&skill.name) {
+                            self.skills.insert(skill.name.clone(), Arc::new(skill));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn register(&mut self, skill: Skill) {
         self.skills.insert(skill.name.clone(), Arc::new(skill));
+    }
+
+    /// Get skill by name, including external skills
+    pub fn get_skill(&self, name: &str) -> Option<Arc<Skill>> {
+        self.skills.get(name).cloned()
     }
 }
 
@@ -202,5 +291,30 @@ mod tests {
         let skill1 = registry.get("github").unwrap();
         let skill2 = registry.get("github").unwrap();
         assert!(Arc::ptr_eq(&skill1, &skill2));
+    }
+
+    #[test]
+    fn test_parse_skill_md_with_frontmatter() {
+        let content = r#"---
+name: test-skill
+description: A test skill
+---
+
+# Test Skill
+
+This is the body content."#;
+        let (desc, body) = parse_skill_md(content);
+        assert_eq!(desc, "A test skill");
+        assert!(body.contains("Test Skill"));
+    }
+
+    #[test]
+    fn test_parse_skill_md_without_frontmatter() {
+        let content = r#"# Test Skill
+
+This is the body content."#;
+        let (desc, body) = parse_skill_md(content);
+        assert!(desc.contains("Test Skill"));
+        assert!(body.contains("body content"));
     }
 }

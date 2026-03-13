@@ -240,14 +240,14 @@ impl HotMemory {
     }
 
     pub fn get(&self, key: &str) -> Option<TieredMemoryEntry> {
-        let mut cache = self.cache.write().ok()?;
+        let cache = self.cache.write().ok()?;
         let entry = cache.get(key)?.clone();
-        
+
         if let Ok(mut order) = self.access_order.write() {
             order.retain(|k| k != key);
             order.push_back(key.to_string());
         }
-        
+
         Some(entry)
     }
 
@@ -255,7 +255,7 @@ impl HotMemory {
         let key = entry.key.clone();
         let mut cache = self.cache.write().unwrap();
         let mut order = self.access_order.write().unwrap();
-        
+
         while cache.len() >= self.max_entries {
             if let Some(oldest) = order.pop_front() {
                 cache.remove(&oldest);
@@ -263,7 +263,7 @@ impl HotMemory {
                 break;
             }
         }
-        
+
         order.retain(|k| k != &key);
         cache.insert(key.clone(), entry);
         order.push_back(key);
@@ -272,7 +272,7 @@ impl HotMemory {
     pub fn remove(&self, key: &str) -> bool {
         let mut cache = self.cache.write().unwrap();
         let mut order = self.access_order.write().unwrap();
-        
+
         order.retain(|k| k != key);
         cache.remove(key).is_some()
     }
@@ -298,7 +298,7 @@ impl HotMemory {
     pub fn search(&self, query: &str, limit: usize) -> Vec<TieredMemoryEntry> {
         let cache = self.cache.read().unwrap();
         let query_lower = query.to_lowercase();
-        
+
         cache
             .values()
             .filter(|e| e.content.to_lowercase().contains(&query_lower))
@@ -318,9 +318,10 @@ pub struct WarmMemory {
 
 impl WarmMemory {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let conn = Connection::open(path)
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
-        
+        let conn = Connection::open(path).map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
+
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS warm_memories (
                 id TEXT PRIMARY KEY,
@@ -335,15 +336,20 @@ impl WarmMemory {
             );
             CREATE INDEX IF NOT EXISTS idx_warm_key ON warm_memories(key);
             CREATE INDEX IF NOT EXISTS idx_warm_priority ON warm_memories(priority);
-            CREATE INDEX IF NOT EXISTS idx_warm_timestamp ON warm_memories(timestamp);"
-        ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            CREATE INDEX IF NOT EXISTS idx_warm_timestamp ON warm_memories(timestamp);",
+        )
+        .map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
 
-        Ok(Self { conn: RwLock::new(conn) })
+        Ok(Self {
+            conn: RwLock::new(conn),
+        })
     }
 
     pub fn get(&self, key: &str) -> Result<Option<TieredMemoryEntry>> {
         let conn = self.conn.read().unwrap();
-        
+
         let mut stmt = conn.prepare(
             "SELECT id, key, content, priority, timestamp, accessed_at, access_count, session_id, tags 
              FROM warm_memories WHERE key = ?"
@@ -352,7 +358,7 @@ impl WarmMemory {
         let result = stmt.query_row([key], |row| {
             let tags_str: String = row.get(8)?;
             let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
-            
+
             Ok(TieredMemoryEntry {
                 id: row.get(0)?,
                 key: row.get(1)?,
@@ -370,7 +376,9 @@ impl WarmMemory {
         match result {
             Ok(entry) => Ok(Some(entry)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(NuClawError::Database { message: e.to_string() }.into()),
+            Err(e) => Err(NuClawError::Database {
+                message: e.to_string(),
+            }),
         }
     }
 
@@ -393,7 +401,10 @@ impl WarmMemory {
                 entry.session_id,
                 tags_json,
             ],
-        ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+        )
+        .map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
 
         Ok(())
     }
@@ -401,43 +412,48 @@ impl WarmMemory {
     /// Delete entry
     pub fn delete(&self, key: &str) -> Result<bool> {
         let conn = self.conn.read().unwrap();
-        let affected = conn.execute("DELETE FROM warm_memories WHERE key = ?", [key])
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
+        let affected = conn
+            .execute("DELETE FROM warm_memories WHERE key = ?", [key])
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
         Ok(affected > 0)
     }
 
     /// Get all entries
     pub fn get_all(&self) -> Result<Vec<TieredMemoryEntry>> {
         let conn = self.conn.read().unwrap();
-        
+
         let mut stmt = conn.prepare(
             "SELECT id, key, content, priority, timestamp, accessed_at, access_count, session_id, tags 
              FROM warm_memories"
         ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
 
-        let rows = stmt.query_map([], |row| {
-            let tags_str: String = row.get(8)?;
-            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
-            
-            Ok(TieredMemoryEntry {
-                id: row.get(0)?,
-                key: row.get(1)?,
-                content: row.get(2)?,
-                tier: MemoryTier::Warm,
-                priority: Priority::from_str(&row.get::<_, String>(3)?),
-                timestamp: row.get(4)?,
-                accessed_at: row.get(5)?,
-                access_count: row.get(6)?,
-                session_id: row.get(7)?,
-                tags,
+        let rows = stmt
+            .query_map([], |row| {
+                let tags_str: String = row.get(8)?;
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+
+                Ok(TieredMemoryEntry {
+                    id: row.get(0)?,
+                    key: row.get(1)?,
+                    content: row.get(2)?,
+                    tier: MemoryTier::Warm,
+                    priority: Priority::from_str(&row.get::<_, String>(3)?),
+                    timestamp: row.get(4)?,
+                    accessed_at: row.get(5)?,
+                    access_count: row.get(6)?,
+                    session_id: row.get(7)?,
+                    tags,
+                })
             })
-        }).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         let mut results = Vec::new();
-        for entry in rows {
-            if let Ok(e) = entry {
-                results.push(e);
-            }
+        for e in rows.flatten() {
+            results.push(e);
         }
         Ok(results)
     }
@@ -445,35 +461,37 @@ impl WarmMemory {
     /// Get entries for archiving
     pub fn get_entries_for_archival(&self) -> Result<Vec<TieredMemoryEntry>> {
         let conn = self.conn.read().unwrap();
-        
+
         let mut stmt = conn.prepare(
             "SELECT id, key, content, priority, timestamp, accessed_at, access_count, session_id, tags 
              FROM warm_memories WHERE timestamp < datetime('now', '-30 days')"
         ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
 
-        let rows = stmt.query_map([], |row| {
-            let tags_str: String = row.get(8)?;
-            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
-            
-            Ok(TieredMemoryEntry {
-                id: row.get(0)?,
-                key: row.get(1)?,
-                content: row.get(2)?,
-                tier: MemoryTier::Warm,
-                priority: Priority::from_str(&row.get::<_, String>(3)?),
-                timestamp: row.get(4)?,
-                accessed_at: row.get(5)?,
-                access_count: row.get(6)?,
-                session_id: row.get(7)?,
-                tags,
+        let rows = stmt
+            .query_map([], |row| {
+                let tags_str: String = row.get(8)?;
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+
+                Ok(TieredMemoryEntry {
+                    id: row.get(0)?,
+                    key: row.get(1)?,
+                    content: row.get(2)?,
+                    tier: MemoryTier::Warm,
+                    priority: Priority::from_str(&row.get::<_, String>(3)?),
+                    timestamp: row.get(4)?,
+                    accessed_at: row.get(5)?,
+                    access_count: row.get(6)?,
+                    session_id: row.get(7)?,
+                    tags,
+                })
             })
-        }).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         let mut results = Vec::new();
-        for entry in rows {
-            if let Ok(e) = entry {
-                results.push(e);
-            }
+        for e in rows.flatten() {
+            results.push(e);
         }
         Ok(results)
     }
@@ -488,29 +506,31 @@ impl WarmMemory {
              FROM warm_memories WHERE content LIKE ? LIMIT ?"
         ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
 
-        let rows = stmt.query_map(rusqlite::params![pattern, limit as i64], |row| {
-            let tags_str: String = row.get(8)?;
-            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
-            
-            Ok(TieredMemoryEntry {
-                id: row.get(0)?,
-                key: row.get(1)?,
-                content: row.get(2)?,
-                tier: MemoryTier::Warm,
-                priority: Priority::from_str(&row.get::<_, String>(3)?),
-                timestamp: row.get(4)?,
-                accessed_at: row.get(5)?,
-                access_count: row.get(6)?,
-                session_id: row.get(7)?,
-                tags,
+        let rows = stmt
+            .query_map(rusqlite::params![pattern, limit as i64], |row| {
+                let tags_str: String = row.get(8)?;
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+
+                Ok(TieredMemoryEntry {
+                    id: row.get(0)?,
+                    key: row.get(1)?,
+                    content: row.get(2)?,
+                    tier: MemoryTier::Warm,
+                    priority: Priority::from_str(&row.get::<_, String>(3)?),
+                    timestamp: row.get(4)?,
+                    accessed_at: row.get(5)?,
+                    access_count: row.get(6)?,
+                    session_id: row.get(7)?,
+                    tags,
+                })
             })
-        }).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         let mut results = Vec::new();
-        for entry in rows {
-            if let Ok(e) = entry {
-                results.push(e);
-            }
+        for e in rows.flatten() {
+            results.push(e);
         }
         Ok(results)
     }
@@ -518,8 +538,11 @@ impl WarmMemory {
     /// Count
     pub fn count(&self) -> Result<usize> {
         let conn = self.conn.read().unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM warm_memories", [], |row| row.get(0))
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM warm_memories", [], |row| row.get(0))
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
         Ok(count as usize)
     }
 
@@ -544,9 +567,10 @@ pub struct ColdMemory {
 impl ColdMemory {
     /// Create new cold memory
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let conn = Connection::open(path)
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
-        
+        let conn = Connection::open(path).map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
+
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS cold_memories (
                 id TEXT PRIMARY KEY,
@@ -559,25 +583,34 @@ impl ColdMemory {
                 tags TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_cold_key ON cold_memories(key);
-            CREATE INDEX IF NOT EXISTS idx_cold_timestamp ON cold_memories(timestamp);"
-        ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            CREATE INDEX IF NOT EXISTS idx_cold_timestamp ON cold_memories(timestamp);",
+        )
+        .map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
 
-        Ok(Self { conn: RwLock::new(conn) })
+        Ok(Self {
+            conn: RwLock::new(conn),
+        })
     }
 
     /// Get entry
     pub fn get(&self, key: &str) -> Result<Option<TieredMemoryEntry>> {
         let conn = self.conn.read().unwrap();
-        
-        let mut stmt = conn.prepare(
-            "SELECT id, key, content, priority, timestamp, archived_at, session_id, tags 
-             FROM cold_memories WHERE key = ?"
-        ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, key, content, priority, timestamp, archived_at, session_id, tags 
+             FROM cold_memories WHERE key = ?",
+            )
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         let result = stmt.query_row([key], |row| {
             let tags_str: String = row.get(7)?;
             let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
-            
+
             Ok(TieredMemoryEntry {
                 id: row.get(0)?,
                 key: row.get(1)?,
@@ -595,7 +628,9 @@ impl ColdMemory {
         match result {
             Ok(entry) => Ok(Some(entry)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(NuClawError::Database { message: e.to_string() }.into()),
+            Err(e) => Err(NuClawError::Database {
+                message: e.to_string(),
+            }),
         }
     }
 
@@ -619,7 +654,10 @@ impl ColdMemory {
                 entry.session_id,
                 tags_json,
             ],
-        ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+        )
+        .map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
 
         Ok(())
     }
@@ -627,8 +665,11 @@ impl ColdMemory {
     /// Delete entry
     pub fn delete(&self, key: &str) -> Result<bool> {
         let conn = self.conn.read().unwrap();
-        let affected = conn.execute("DELETE FROM cold_memories WHERE key = ?", [key])
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
+        let affected = conn
+            .execute("DELETE FROM cold_memories WHERE key = ?", [key])
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
         Ok(affected > 0)
     }
 
@@ -637,34 +678,40 @@ impl ColdMemory {
         let conn = self.conn.read().unwrap();
         let pattern = format!("%{}%", query);
 
-        let mut stmt = conn.prepare(
-            "SELECT id, key, content, priority, timestamp, archived_at, session_id, tags 
-             FROM cold_memories WHERE content LIKE ? LIMIT ?"
-        ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, key, content, priority, timestamp, archived_at, session_id, tags 
+             FROM cold_memories WHERE content LIKE ? LIMIT ?",
+            )
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
-        let rows = stmt.query_map(rusqlite::params![pattern, limit as i64], |row| {
-            let tags_str: String = row.get(7)?;
-            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
-            
-            Ok(TieredMemoryEntry {
-                id: row.get(0)?,
-                key: row.get(1)?,
-                content: row.get(2)?,
-                tier: MemoryTier::Cold,
-                priority: Priority::from_str(&row.get::<_, String>(3)?),
-                timestamp: row.get(4)?,
-                accessed_at: row.get(5)?,
-                access_count: 0,
-                session_id: row.get(6)?,
-                tags,
+        let rows = stmt
+            .query_map(rusqlite::params![pattern, limit as i64], |row| {
+                let tags_str: String = row.get(7)?;
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+
+                Ok(TieredMemoryEntry {
+                    id: row.get(0)?,
+                    key: row.get(1)?,
+                    content: row.get(2)?,
+                    tier: MemoryTier::Cold,
+                    priority: Priority::from_str(&row.get::<_, String>(3)?),
+                    timestamp: row.get(4)?,
+                    accessed_at: row.get(5)?,
+                    access_count: 0,
+                    session_id: row.get(6)?,
+                    tags,
+                })
             })
-        }).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         let mut results = Vec::new();
-        for entry in rows {
-            if let Ok(e) = entry {
-                results.push(e);
-            }
+        for e in rows.flatten() {
+            results.push(e);
         }
         Ok(results)
     }
@@ -672,8 +719,11 @@ impl ColdMemory {
     /// Count
     pub fn count(&self) -> Result<usize> {
         let conn = self.conn.read().unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM cold_memories", [], |row| row.get(0))
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cold_memories", [], |row| row.get(0))
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
         Ok(count as usize)
     }
 
@@ -705,7 +755,12 @@ impl TieredMemory {
         let warm = Arc::new(WarmMemory::new(db_path.as_ref().join("warm_memories.db"))?);
         let cold = Arc::new(ColdMemory::new(db_path.as_ref().join("cold_memories.db"))?);
 
-        Ok(Self { hot, warm, cold, policy })
+        Ok(Self {
+            hot,
+            warm,
+            cold,
+            policy,
+        })
     }
 
     /// Remember - store a memory
@@ -758,15 +813,15 @@ impl TieredMemory {
     /// Search across all tiers
     pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<TieredMemoryEntry>> {
         let mut results = Vec::new();
-        
+
         // Search hot
         results.extend(self.hot.search(query, limit));
-        
+
         // Search warm
         if results.len() < limit {
             results.extend(self.warm.search(query, limit - results.len())?);
         }
-        
+
         // Search cold
         if results.len() < limit {
             results.extend(self.cold.search(query, limit - results.len())?);
@@ -778,7 +833,7 @@ impl TieredMemory {
     /// Forget - delete from all tiers
     pub async fn forget(&self, key: &str) -> Result<bool> {
         let mut deleted = false;
-        
+
         if self.hot.remove(key) {
             deleted = true;
         }
@@ -921,9 +976,10 @@ pub struct SqliteMemory {
 
 impl SqliteMemory {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let conn = Connection::open(path)
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
-        
+        let conn = Connection::open(path).map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
+
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
@@ -934,10 +990,15 @@ impl SqliteMemory {
                 session_id TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
-            CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);"
-        ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);",
+        )
+        .map_err(|e| NuClawError::Database {
+            message: e.to_string(),
+        })?;
 
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     fn generate_id(&self) -> String {
@@ -966,29 +1027,31 @@ impl Memory for SqliteMemory {
 
     async fn recall(&self, query: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
         let conn = self.conn.lock().unwrap();
-        
+
         let mut stmt = conn.prepare(
             "SELECT id, key, content, category, timestamp, session_id FROM memories WHERE content LIKE ? LIMIT ?"
         ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
 
         let search_pattern = format!("%{}%", query);
-        let entries = stmt.query_map([&search_pattern, &limit.to_string()], |row| {
-            Ok(MemoryEntry {
-                id: row.get(0)?,
-                key: row.get(1)?,
-                content: row.get(2)?,
-                category: MemoryCategory::from_str(&row.get::<_, String>(3)?),
-                timestamp: row.get(4)?,
-                session_id: row.get(5)?,
-                score: None,
+        let entries = stmt
+            .query_map([&search_pattern, &limit.to_string()], |row| {
+                Ok(MemoryEntry {
+                    id: row.get(0)?,
+                    key: row.get(1)?,
+                    content: row.get(2)?,
+                    category: MemoryCategory::from_str(&row.get::<_, String>(3)?),
+                    timestamp: row.get(4)?,
+                    session_id: row.get(5)?,
+                    score: None,
+                })
             })
-        }).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         let mut results = Vec::new();
-        for entry in entries {
-            if let Ok(e) = entry {
-                results.push(e);
-            }
+        for e in entries.flatten() {
+            results.push(e);
         }
 
         Ok(results)
@@ -996,7 +1059,7 @@ impl Memory for SqliteMemory {
 
     async fn get(&self, key: &str) -> Result<Option<MemoryEntry>> {
         let conn = self.conn.lock().unwrap();
-        
+
         let mut stmt = conn.prepare(
             "SELECT id, key, content, category, timestamp, session_id FROM memories WHERE key = ?"
         ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
@@ -1016,58 +1079,66 @@ impl Memory for SqliteMemory {
         match result {
             Ok(entry) => Ok(Some(entry)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(NuClawError::Database { message: e.to_string() }.into()),
+            Err(e) => Err(NuClawError::Database {
+                message: e.to_string(),
+            }),
         }
     }
 
     async fn list(&self, category: Option<&MemoryCategory>) -> Result<Vec<MemoryEntry>> {
         let conn = self.conn.lock().unwrap();
-        
+
         let mut results = Vec::new();
-        
+
         if let Some(cat) = category {
             let mut stmt = conn.prepare(
                 "SELECT id, key, content, category, timestamp, session_id FROM memories WHERE category = ?"
             ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
 
-            let rows = stmt.query_map([cat.to_string()], |row| {
-                Ok(MemoryEntry {
-                    id: row.get(0)?,
-                    key: row.get(1)?,
-                    content: row.get(2)?,
-                    category: MemoryCategory::from_str(&row.get::<_, String>(3)?),
-                    timestamp: row.get(4)?,
-                    session_id: row.get(5)?,
-                    score: None,
+            let rows = stmt
+                .query_map([cat.to_string()], |row| {
+                    Ok(MemoryEntry {
+                        id: row.get(0)?,
+                        key: row.get(1)?,
+                        content: row.get(2)?,
+                        category: MemoryCategory::from_str(&row.get::<_, String>(3)?),
+                        timestamp: row.get(4)?,
+                        session_id: row.get(5)?,
+                        score: None,
+                    })
                 })
-            }).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+                .map_err(|e| NuClawError::Database {
+                    message: e.to_string(),
+                })?;
 
-            for entry in rows {
-                if let Ok(e) = entry {
-                    results.push(e);
-                }
+            for e in rows.flatten() {
+                results.push(e);
             }
         } else {
-            let mut stmt = conn.prepare(
-                "SELECT id, key, content, category, timestamp, session_id FROM memories"
-            ).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+            let mut stmt = conn
+                .prepare("SELECT id, key, content, category, timestamp, session_id FROM memories")
+                .map_err(|e| NuClawError::Database {
+                    message: e.to_string(),
+                })?;
 
-            let rows = stmt.query_map([], |row| {
-                Ok(MemoryEntry {
-                    id: row.get(0)?,
-                    key: row.get(1)?,
-                    content: row.get(2)?,
-                    category: MemoryCategory::from_str(&row.get::<_, String>(3)?),
-                    timestamp: row.get(4)?,
-                    session_id: row.get(5)?,
-                    score: None,
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(MemoryEntry {
+                        id: row.get(0)?,
+                        key: row.get(1)?,
+                        content: row.get(2)?,
+                        category: MemoryCategory::from_str(&row.get::<_, String>(3)?),
+                        timestamp: row.get(4)?,
+                        session_id: row.get(5)?,
+                        score: None,
+                    })
                 })
-            }).map_err(|e| NuClawError::Database { message: e.to_string() })?;
+                .map_err(|e| NuClawError::Database {
+                    message: e.to_string(),
+                })?;
 
-            for entry in rows {
-                if let Ok(e) = entry {
-                    results.push(e);
-                }
+            for e in rows.flatten() {
+                results.push(e);
             }
         }
 
@@ -1076,18 +1147,24 @@ impl Memory for SqliteMemory {
 
     async fn forget(&self, key: &str) -> Result<bool> {
         let conn = self.conn.lock().unwrap();
-        
-        let affected = conn.execute("DELETE FROM memories WHERE key = ?", [key])
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
+
+        let affected = conn
+            .execute("DELETE FROM memories WHERE key = ?", [key])
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         Ok(affected > 0)
     }
 
     async fn count(&self) -> Result<usize> {
         let conn = self.conn.lock().unwrap();
-        
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))
-            .map_err(|e| NuClawError::Database { message: e.to_string() })?;
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))
+            .map_err(|e| NuClawError::Database {
+                message: e.to_string(),
+            })?;
 
         Ok(count as usize)
     }
@@ -1126,9 +1203,18 @@ mod tier_tests {
 
     #[test]
     fn test_priority_from_category() {
-        assert_eq!(Priority::from_category(&MemoryCategory::Core), Priority::Critical);
-        assert_eq!(Priority::from_category(&MemoryCategory::Daily), Priority::High);
-        assert_eq!(Priority::from_category(&MemoryCategory::Conversation), Priority::Normal);
+        assert_eq!(
+            Priority::from_category(&MemoryCategory::Core),
+            Priority::Critical
+        );
+        assert_eq!(
+            Priority::from_category(&MemoryCategory::Daily),
+            Priority::High
+        );
+        assert_eq!(
+            Priority::from_category(&MemoryCategory::Conversation),
+            Priority::Normal
+        );
     }
 
     #[test]
@@ -1179,11 +1265,8 @@ mod tier_tests {
 
     #[test]
     fn test_tiered_memory_entry_to_legacy() {
-        let entry = TieredMemoryEntry::new(
-            "key".to_string(),
-            "content".to_string(),
-            Priority::Critical,
-        );
+        let entry =
+            TieredMemoryEntry::new("key".to_string(), "content".to_string(), Priority::Critical);
 
         let legacy = entry.to_legacy();
         assert_eq!(legacy.key, "key");
@@ -1206,11 +1289,12 @@ mod tier_tests {
     #[test]
     fn test_hot_memory_store_and_get() {
         let hot = HotMemory::new(100);
-        let entry = TieredMemoryEntry::new("key1".to_string(), "content1".to_string(), Priority::Normal);
-        
+        let entry =
+            TieredMemoryEntry::new("key1".to_string(), "content1".to_string(), Priority::Normal);
+
         hot.store(entry);
         let retrieved = hot.get("key1");
-        
+
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().content, "content1");
     }
@@ -1218,8 +1302,9 @@ mod tier_tests {
     #[test]
     fn test_hot_memory_remove() {
         let hot = HotMemory::new(100);
-        let entry = TieredMemoryEntry::new("key1".to_string(), "content1".to_string(), Priority::Normal);
-        
+        let entry =
+            TieredMemoryEntry::new("key1".to_string(), "content1".to_string(), Priority::Normal);
+
         hot.store(entry);
         assert!(hot.remove("key1"));
         assert!(hot.get("key1").is_none());
@@ -1229,19 +1314,35 @@ mod tier_tests {
     fn test_hot_memory_count() {
         let hot = HotMemory::new(100);
         assert_eq!(hot.count(), 0);
-        
-        hot.store(TieredMemoryEntry::new("k1".to_string(), "c1".to_string(), Priority::Normal));
-        hot.store(TieredMemoryEntry::new("k2".to_string(), "c2".to_string(), Priority::Normal));
-        
+
+        hot.store(TieredMemoryEntry::new(
+            "k1".to_string(),
+            "c1".to_string(),
+            Priority::Normal,
+        ));
+        hot.store(TieredMemoryEntry::new(
+            "k2".to_string(),
+            "c2".to_string(),
+            Priority::Normal,
+        ));
+
         assert_eq!(hot.count(), 2);
     }
 
     #[test]
     fn test_hot_memory_search() {
         let hot = HotMemory::new(100);
-        hot.store(TieredMemoryEntry::new("k1".to_string(), "hello world".to_string(), Priority::Normal));
-        hot.store(TieredMemoryEntry::new("k2".to_string(), "goodbye world".to_string(), Priority::Normal));
-        
+        hot.store(TieredMemoryEntry::new(
+            "k1".to_string(),
+            "hello world".to_string(),
+            Priority::Normal,
+        ));
+        hot.store(TieredMemoryEntry::new(
+            "k2".to_string(),
+            "goodbye world".to_string(),
+            Priority::Normal,
+        ));
+
         let results = hot.search("hello", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].key, "k1");
@@ -1256,11 +1357,23 @@ mod tier_tests {
     #[test]
     fn test_hot_memory_lru_eviction() {
         let hot = HotMemory::new(2);
-        
-        hot.store(TieredMemoryEntry::new("k1".to_string(), "c1".to_string(), Priority::Normal));
-        hot.store(TieredMemoryEntry::new("k2".to_string(), "c2".to_string(), Priority::Normal));
-        hot.store(TieredMemoryEntry::new("k3".to_string(), "c3".to_string(), Priority::Normal));
-        
+
+        hot.store(TieredMemoryEntry::new(
+            "k1".to_string(),
+            "c1".to_string(),
+            Priority::Normal,
+        ));
+        hot.store(TieredMemoryEntry::new(
+            "k2".to_string(),
+            "c2".to_string(),
+            Priority::Normal,
+        ));
+        hot.store(TieredMemoryEntry::new(
+            "k3".to_string(),
+            "c3".to_string(),
+            Priority::Normal,
+        ));
+
         // k1 should be evicted
         assert!(hot.get("k1").is_none());
         assert!(hot.get("k2").is_some());
@@ -1272,50 +1385,64 @@ mod tier_tests {
     #[test]
     fn test_warm_memory_operations() {
         let dir = temp_dir();
-        
+
         let warm = WarmMemory::new(dir.join("warm.db")).unwrap();
-        
+
         // Store
-        let entry = TieredMemoryEntry::new("warm_key".to_string(), "warm_content".to_string(), Priority::High);
+        let entry = TieredMemoryEntry::new(
+            "warm_key".to_string(),
+            "warm_content".to_string(),
+            Priority::High,
+        );
         warm.store(&entry).unwrap();
-        
+
         // Get
         let retrieved = warm.get("warm_key").unwrap();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().content, "warm_content");
-        
+
         // Count
         assert_eq!(warm.count().unwrap(), 1);
-        
+
         // Delete
         assert!(warm.delete("warm_key").unwrap());
         assert_eq!(warm.count().unwrap(), 0);
-        
+
         cleanup(&dir);
     }
 
     #[test]
     fn test_warm_memory_search() {
         let dir = temp_dir();
-        
+
         let warm = WarmMemory::new(dir.join("warm.db")).unwrap();
-        
-        warm.store(&TieredMemoryEntry::new("k1".to_string(), "hello world".to_string(), Priority::Normal)).unwrap();
-        warm.store(&TieredMemoryEntry::new("k2".to_string(), "goodbye world".to_string(), Priority::Normal)).unwrap();
-        
+
+        warm.store(&TieredMemoryEntry::new(
+            "k1".to_string(),
+            "hello world".to_string(),
+            Priority::Normal,
+        ))
+        .unwrap();
+        warm.store(&TieredMemoryEntry::new(
+            "k2".to_string(),
+            "goodbye world".to_string(),
+            Priority::Normal,
+        ))
+        .unwrap();
+
         let results = warm.search("hello", 10).unwrap();
         assert_eq!(results.len(), 1);
-        
+
         cleanup(&dir);
     }
 
     #[test]
     fn test_warm_memory_health_check() {
         let dir = temp_dir();
-        
+
         let warm = WarmMemory::new(dir.join("warm.db")).unwrap();
         assert!(warm.health_check());
-        
+
         cleanup(&dir);
     }
 
@@ -1324,37 +1451,46 @@ mod tier_tests {
     #[test]
     fn test_cold_memory_operations() {
         let dir = temp_dir();
-        
+
         let cold = ColdMemory::new(dir.join("cold.db")).unwrap();
-        
+
         // Archive
-        let entry = TieredMemoryEntry::new("cold_key".to_string(), "cold_content".to_string(), Priority::Low);
+        let entry = TieredMemoryEntry::new(
+            "cold_key".to_string(),
+            "cold_content".to_string(),
+            Priority::Low,
+        );
         cold.archive(&entry).unwrap();
-        
+
         // Get
         let retrieved = cold.get("cold_key").unwrap();
         assert!(retrieved.is_some());
-        
+
         // Count
         assert_eq!(cold.count().unwrap(), 1);
-        
+
         // Delete
         assert!(cold.delete("cold_key").unwrap());
-        
+
         cleanup(&dir);
     }
 
     #[test]
     fn test_cold_memory_search() {
         let dir = temp_dir();
-        
+
         let cold = ColdMemory::new(dir.join("cold.db")).unwrap();
-        
-        cold.archive(&TieredMemoryEntry::new("k1".to_string(), "archived content".to_string(), Priority::Low)).unwrap();
-        
+
+        cold.archive(&TieredMemoryEntry::new(
+            "k1".to_string(),
+            "archived content".to_string(),
+            Priority::Low,
+        ))
+        .unwrap();
+
         let results = cold.search("archived", 10).unwrap();
         assert_eq!(results.len(), 1);
-        
+
         cleanup(&dir);
     }
 
@@ -1363,17 +1499,19 @@ mod tier_tests {
     #[test]
     fn test_tiered_memory_remember_and_recall() {
         let dir = temp_dir();
-        
+
         let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
-        
+
         // Remember
-        tiered.blocking_remember("test_key", "test_content", Priority::High).unwrap();
-        
+        tiered
+            .blocking_remember("test_key", "test_content", Priority::High)
+            .unwrap();
+
         // Recall
         let result = tiered.blocking_recall("test_key").unwrap();
         assert!(result.is_some());
         assert_eq!(result.unwrap().content, "test_content");
-        
+
         // Cleanup
         let _ = fs::remove_file(dir.join("warm_memories.db"));
         let _ = fs::remove_file(dir.join("cold_memories.db"));
@@ -1383,14 +1521,16 @@ mod tier_tests {
     #[test]
     fn test_tiered_memory_search() {
         let dir = temp_dir();
-        
+
         let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
-        
-        tiered.blocking_remember("k1", "hello world", Priority::Normal).unwrap();
-        
+
+        tiered
+            .blocking_remember("k1", "hello world", Priority::Normal)
+            .unwrap();
+
         let results = tiered.blocking_search("hello", 10).unwrap();
         assert_eq!(results.len(), 1);
-        
+
         // Cleanup
         let _ = fs::remove_file(dir.join("warm_memories.db"));
         let _ = fs::remove_file(dir.join("cold_memories.db"));
@@ -1400,12 +1540,14 @@ mod tier_tests {
     #[test]
     fn test_tiered_memory_forget() {
         let dir = temp_dir();
-        
+
         let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
-        
-        tiered.blocking_remember("to_delete", "content", Priority::Normal).unwrap();
+
+        tiered
+            .blocking_remember("to_delete", "content", Priority::Normal)
+            .unwrap();
         assert!(tiered.blocking_forget("to_delete").unwrap());
-        
+
         // Cleanup
         let _ = fs::remove_file(dir.join("warm_memories.db"));
         let _ = fs::remove_file(dir.join("cold_memories.db"));
@@ -1415,13 +1557,13 @@ mod tier_tests {
     #[test]
     fn test_tiered_memory_health_check() {
         let dir = temp_dir();
-        
+
         let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
-        
+
         assert!(tiered.hot().health_check());
         assert!(tiered.warm().health_check());
         assert!(tiered.cold().health_check());
-        
+
         // Cleanup
         let _ = fs::remove_file(dir.join("warm_memories.db"));
         let _ = fs::remove_file(dir.join("cold_memories.db"));
@@ -1474,13 +1616,13 @@ impl TieredMemory {
     /// Blocking search
     pub fn blocking_search(&self, query: &str, limit: usize) -> Result<Vec<TieredMemoryEntry>> {
         let mut results = Vec::new();
-        
+
         results.extend(self.hot.search(query, limit));
-        
+
         if results.len() < limit {
             results.extend(self.warm.search(query, limit - results.len())?);
         }
-        
+
         if results.len() < limit {
             results.extend(self.cold.search(query, limit - results.len())?);
         }
@@ -1491,7 +1633,7 @@ impl TieredMemory {
     /// Blocking forget
     pub fn blocking_forget(&self, key: &str) -> Result<bool> {
         let mut deleted = false;
-        
+
         if self.hot.remove(key) {
             deleted = true;
         }
@@ -1523,8 +1665,14 @@ mod legacy_tests {
     fn test_memory_category_from_str() {
         assert_eq!(MemoryCategory::from_str("core"), MemoryCategory::Core);
         assert_eq!(MemoryCategory::from_str("daily"), MemoryCategory::Daily);
-        assert_eq!(MemoryCategory::from_str("conversation"), MemoryCategory::Conversation);
-        assert_eq!(MemoryCategory::from_str("custom"), MemoryCategory::Custom("custom".to_string()));
+        assert_eq!(
+            MemoryCategory::from_str("conversation"),
+            MemoryCategory::Conversation
+        );
+        assert_eq!(
+            MemoryCategory::from_str("custom"),
+            MemoryCategory::Custom("custom".to_string())
+        );
     }
 
     #[test]
@@ -1551,7 +1699,10 @@ mod legacy_tests {
         assert_eq!(MemoryCategory::Core.to_string(), "core");
         assert_eq!(MemoryCategory::Daily.to_string(), "daily");
         assert_eq!(MemoryCategory::Conversation.to_string(), "conversation");
-        assert_eq!(MemoryCategory::Custom("custom".to_string()).to_string(), "custom");
+        assert_eq!(
+            MemoryCategory::Custom("custom".to_string()).to_string(),
+            "custom"
+        );
     }
 
     #[test]
@@ -1572,8 +1723,11 @@ mod legacy_tests {
     #[tokio::test]
     async fn test_noop_memory_operations() {
         let memory = NoopMemory;
-        
-        assert!(memory.store("key", "content", MemoryCategory::Core).await.is_ok());
+
+        assert!(memory
+            .store("key", "content", MemoryCategory::Core)
+            .await
+            .is_ok());
         assert!(memory.get("key").await.unwrap().is_none());
         assert!(memory.recall("query", 10).await.unwrap().is_empty());
         assert!(memory.list(None).await.unwrap().is_empty());
@@ -1605,30 +1759,36 @@ mod legacy_tests {
     #[tokio::test]
     async fn test_sqlite_memory_operations() {
         let path = temp_path();
-        
+
         {
             let memory = SqliteMemory::new(&path).unwrap();
-            
-            memory.store("test_key", "test content", MemoryCategory::Core).await.unwrap();
-            
+
+            memory
+                .store("test_key", "test content", MemoryCategory::Core)
+                .await
+                .unwrap();
+
             let result = memory.get("test_key").await.unwrap();
             assert!(result.is_some());
             assert_eq!(result.unwrap().key, "test_key");
-            
-            memory.store("key2", "content2", MemoryCategory::Daily).await.unwrap();
-            
+
+            memory
+                .store("key2", "content2", MemoryCategory::Daily)
+                .await
+                .unwrap();
+
             let all = memory.list(None).await.unwrap();
             assert_eq!(all.len(), 2);
-            
+
             let core = memory.list(Some(&MemoryCategory::Core)).await.unwrap();
             assert_eq!(core.len(), 1);
-            
+
             memory.forget("key2").await.unwrap();
             assert_eq!(memory.count().await.unwrap(), 1);
-            
+
             assert!(memory.health_check().await);
         }
-        
+
         cleanup(&path);
     }
 }

@@ -68,13 +68,12 @@ pub struct ApiRunner {
 
 impl ApiRunner {
     pub fn new() -> Result<Self> {
-        let api_key = anthropic_api_key().ok_or_else(|| {
-            NuClawError::Config {
-                message: "ANTHROPIC_API_KEY is required for API mode".to_string(),
-            }
+        let api_key = anthropic_api_key().ok_or_else(|| NuClawError::Config {
+            message: "ANTHROPIC_API_KEY is required for API mode".to_string(),
         })?;
 
-        let base_url = anthropic_base_url().unwrap_or_else(|| "https://api.anthropic.com".to_string());
+        let base_url =
+            anthropic_base_url().unwrap_or_else(|| "https://api.anthropic.com".to_string());
         let model = claude_model().unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
 
         let client = Client::new();
@@ -129,10 +128,8 @@ impl AgentRunner for ApiRunner {
             });
         }
 
-        let anthropic_response: AnthropicResponse = response
-            .json()
-            .await
-            .map_err(|e| NuClawError::Api {
+        let anthropic_response: AnthropicResponse =
+            response.json().await.map_err(|e| NuClawError::Api {
                 message: format!("Failed to parse response: {}", e),
             })?;
 
@@ -160,21 +157,21 @@ impl AgentRunner for ApiRunner {
 
 fn build_system_prompt(input: &ContainerInput) -> String {
     let mut prompt = String::new();
-    
+
     prompt.push_str("You are Claude, an AI assistant.\n\n");
-    
+
     if input.is_main {
         prompt.push_str("You are running in the main context.\n");
     } else {
         prompt.push_str("You are running in an isolated context.\n");
     }
-    
+
     if input.is_scheduled_task {
         prompt.push_str("This is a scheduled task.\n");
     }
-    
+
     prompt.push_str(&format!("Group folder: {}\n", input.group_folder));
-    
+
     prompt
 }
 
@@ -201,8 +198,24 @@ impl AgentRunner for ContainerRunnerAdapter {
 mod tests {
     use super::*;
 
+    // Use a guard to ensure env var cleanup even on panic
+    struct EnvGuard(&'static str);
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var(self.0);
+        }
+    }
+
+    fn with_env_var(key: &'static str, value: &str) -> EnvGuard {
+        std::env::remove_var(key);
+        std::env::set_var(key, value);
+        EnvGuard(key)
+    }
+
     #[test]
     fn test_agent_runner_mode_default() {
+        std::env::remove_var("AGENT_RUNNER_MODE");
+        let _guard = with_env_var("AGENT_RUNNER_MODE", "");
         std::env::remove_var("AGENT_RUNNER_MODE");
         assert_eq!(agent_runner_mode(), AgentRunnerMode::Container);
     }
@@ -210,25 +223,22 @@ mod tests {
     #[test]
     fn test_agent_runner_mode_container() {
         std::env::remove_var("AGENT_RUNNER_MODE");
-        std::env::set_var("AGENT_RUNNER_MODE", "container");
+        let _guard = with_env_var("AGENT_RUNNER_MODE", "container");
         assert_eq!(agent_runner_mode(), AgentRunnerMode::Container);
-        std::env::remove_var("AGENT_RUNNER_MODE");
     }
 
     #[test]
     fn test_agent_runner_mode_api() {
         std::env::remove_var("AGENT_RUNNER_MODE");
-        std::env::set_var("AGENT_RUNNER_MODE", "api");
+        let _guard = with_env_var("AGENT_RUNNER_MODE", "api");
         assert_eq!(agent_runner_mode(), AgentRunnerMode::Api);
-        std::env::remove_var("AGENT_RUNNER_MODE");
     }
 
     #[test]
     fn test_agent_runner_mode_invalid() {
         std::env::remove_var("AGENT_RUNNER_MODE");
-        std::env::set_var("AGENT_RUNNER_MODE", "invalid");
+        let _guard = with_env_var("AGENT_RUNNER_MODE", "invalid");
         assert_eq!(agent_runner_mode(), AgentRunnerMode::Container);
-        std::env::remove_var("AGENT_RUNNER_MODE");
     }
 
     #[test]
@@ -312,11 +322,11 @@ mod tests {
         std::env::remove_var("ANTHROPIC_API_KEY");
         std::env::remove_var("ANTHROPIC_BASE_URL");
         std::env::remove_var("CLAUDE_MODEL");
-        
+
         std::env::set_var("ANTHROPIC_API_KEY", "test-key-123");
         let result = ApiRunner::new();
         assert!(result.is_ok());
-        
+
         std::env::remove_var("ANTHROPIC_API_KEY");
     }
 }
