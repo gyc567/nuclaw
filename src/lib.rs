@@ -42,3 +42,9 @@ pub use onboard::{load_config, print_config_status, run_onboard, save_config};
 pub use providers::{ProviderConfig, ProviderRegistry, ProviderSpec, PROVIDERS};
 pub use skills::{Skill, SkillRegistry};
 pub use task_scheduler::TaskScheduler;
+pub use telegram::{
+    chunk_text_advanced, chunk_text_pure, extract_chat_id_pure, is_allowed_group_pure,
+    is_duplicate_message_pure, load_registered_groups, load_router_state, truncate, ChunkMode,
+    DMPolicy, GroupPolicy, ReplyMode, StreamMode, TelegramChat, TelegramClient, TelegramMessage,
+    TelegramUpdate, TelegramUser, DEFAULT_TEXT_CHUNK_LIMIT,
+};
