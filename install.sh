@@ -70,7 +70,7 @@ detect_arch() {
 get_nuclaw_home() {
     if [[ -n "${NUCLAW_HOME:-}" ]]; then
         echo "$NUCLAW_HOME"
-    elif [[ "$OS" == "windows" ]]; then
+    elif [[ "${OS:-unknown}" == "windows" ]]; then
         echo "${USERPROFILE:-${HOME}}/.nuclaw"
     else
         echo "${HOME}/.nuclaw"
@@ -79,7 +79,7 @@ get_nuclaw_home() {
 
 # Get temp directory
 get_temp_dir() {
-    if [[ "$OS" == "windows" ]]; then
+    if [[ "${OS:-unknown}" == "windows" ]]; then
         echo "${TEMP:-/tmp}"
     else
         echo "/tmp"
