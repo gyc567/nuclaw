@@ -10,6 +10,7 @@
 //! - Provider/Channel registry
 
 pub mod agent_runner;
+pub mod autoresearch;
 pub mod channels;
 pub mod config;
 pub mod container_runner;
@@ -47,4 +48,8 @@ pub use telegram::{
     is_duplicate_message_pure, load_registered_groups, load_router_state, truncate, ChunkMode,
     DMPolicy, GroupPolicy, ReplyMode, StreamMode, TelegramChat, TelegramClient, TelegramMessage,
     TelegramUpdate, TelegramUser, DEFAULT_TEXT_CHUNK_LIMIT,
+};
+pub use autoresearch::{
+    AutoResearchRunner, EvalError, Evaluator, ExperimentConfig, ExperimentHistory, ExperimentResult,
+    Metric, Program, ProgramError, RunnerError,
 };
