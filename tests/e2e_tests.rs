@@ -150,8 +150,8 @@ mod e2e_tests {
         let weather = skills.get("weather");
         assert!(weather.is_some());
 
-        let search = skills.get("search");
-        assert!(search.is_some());
+        let web_search = skills.get("web-search");
+        assert!(web_search.is_some());
 
         let memory = skills.get("memory");
         assert!(memory.is_some());
@@ -1488,5 +1488,286 @@ ANTHROPIC_API_KEY=sk-comment-test
 
         // Cleanup
         let _ = fs::remove_dir_all("/tmp/nuclaw_no_dup_test");
+    }
+
+    // =========================================================================
+    // Skills Agent Skills Specification E2E Tests
+    // =========================================================================
+
+    #[test]
+    fn test_skill_from_directory_minimal() {
+        use nuclaw::skills::Skill;
+        use std::path::PathBuf;
+
+        let test_dir = "/tmp/nuclaw_test_skill_minimal";
+        let _ = fs::remove_dir_all(test_dir);
+        fs::create_dir_all(test_dir).expect("Failed to create test dir");
+
+        let skill_md = r#"---
+name: minimal-test
+description: A minimal skill for testing
+---
+
+# Minimal Skill
+
+This is a test skill content."#;
+
+        fs::write(format!("{}/SKILL.md", test_dir), skill_md).expect("Failed to write SKILL.md");
+
+        let skill = Skill::from_directory(&PathBuf::from(test_dir));
+        assert!(skill.is_some());
+        let skill = skill.unwrap();
+        assert_eq!(skill.name, "minimal-test");
+        assert_eq!(skill.description, "A minimal skill for testing");
+        assert!(skill.content.contains("test skill content"));
+
+        let _ = fs::remove_dir_all(test_dir);
+    }
+
+    #[test]
+    fn test_skill_from_directory_full_frontmatter() {
+        use nuclaw::skills::Skill;
+        use std::path::PathBuf;
+
+        let test_dir = "/tmp/nuclaw_test_skill_full";
+        let _ = fs::remove_dir_all(test_dir);
+        fs::create_dir_all(test_dir).expect("Failed to create test dir");
+
+        let skill_md = r#"---
+name: full-test
+description: A full skill with all fields
+license: Apache-2.0
+compatibility: Requires Python 3.8 and Docker
+metadata:
+  author: test-author
+  version: "2.0"
+allowed-tools: Bash Read Write
+---
+
+# Full Test Skill
+
+This skill has all frontmatter fields."#;
+
+        fs::write(format!("{}/SKILL.md", test_dir), skill_md).expect("Failed to write SKILL.md");
+
+        let skill = Skill::from_directory(&PathBuf::from(test_dir));
+        assert!(skill.is_some());
+        let skill = skill.unwrap();
+
+        assert_eq!(skill.name, "full-test");
+        assert_eq!(skill.description, "A full skill with all fields");
+        assert_eq!(skill.license, Some("Apache-2.0".to_string()));
+        assert_eq!(
+            skill.compatibility,
+            Some("Requires Python 3.8 and Docker".to_string())
+        );
+        assert_eq!(skill.metadata.author, Some("test-author".to_string()));
+        assert_eq!(skill.metadata.version, Some("2.0".to_string()));
+        assert_eq!(skill.allowed_tools, Some("Bash Read Write".to_string()));
+
+        let _ = fs::remove_dir_all(test_dir);
+    }
+
+    #[test]
+    fn test_skill_from_directory_with_subdirs() {
+        use nuclaw::skills::Skill;
+        use std::path::PathBuf;
+
+        let test_dir = "/tmp/nuclaw_test_skill_subdirs";
+        let _ = fs::remove_dir_all(test_dir);
+
+        fs::create_dir_all(format!("{}/scripts", test_dir)).expect("Failed to create scripts");
+        fs::create_dir_all(format!("{}/references", test_dir))
+            .expect("Failed to create references");
+        fs::create_dir_all(format!("{}/assets", test_dir)).expect("Failed to create assets");
+
+        let skill_md = r#"---
+name: subdirs-test
+description: A skill with subdirectories
+---
+
+# Subdirs Test Skill"#;
+
+        fs::write(format!("{}/SKILL.md", test_dir), skill_md).expect("Failed to write SKILL.md");
+        fs::write(format!("{}/scripts/test.py", test_dir), "print('test')")
+            .expect("Failed to write script");
+        fs::write(format!("{}/references/README.md", test_dir), "# Reference")
+            .expect("Failed to write ref");
+        fs::write(format!("{}/assets/template.txt", test_dir), "template")
+            .expect("Failed to write asset");
+
+        let skill = Skill::from_directory(&PathBuf::from(test_dir));
+        assert!(skill.is_some());
+        let skill = skill.unwrap();
+
+        assert!(skill.has_scripts());
+        assert!(skill.has_references());
+        assert!(skill.has_assets());
+
+        assert_eq!(
+            skill.scripts_dir().unwrap().to_string_lossy(),
+            format!("{}/scripts", test_dir)
+        );
+        assert_eq!(
+            skill.references_dir().unwrap().to_string_lossy(),
+            format!("{}/references", test_dir)
+        );
+        assert_eq!(
+            skill.assets_dir().unwrap().to_string_lossy(),
+            format!("{}/assets", test_dir)
+        );
+
+        let _ = fs::remove_dir_all(test_dir);
+    }
+
+    #[test]
+    fn test_skill_from_directory_missing_skill_md() {
+        use nuclaw::skills::Skill;
+        use std::path::PathBuf;
+
+        let test_dir = "/tmp/test_skill_no_md";
+        let _ = fs::remove_dir_all(test_dir);
+        fs::create_dir_all(test_dir).expect("Failed to create test dir");
+
+        let skill = Skill::from_directory(&PathBuf::from(test_dir));
+        assert!(skill.is_none());
+
+        let _ = fs::remove_dir_all(test_dir);
+    }
+
+    #[test]
+    fn test_skill_registry_with_external_skills() {
+        use nuclaw::config::skills_dir;
+        use nuclaw::skills::builtin_skills;
+
+        let test_nuclaw_home = "/tmp/nuclaw_external_skills_test";
+        let _ = fs::remove_dir_all(test_nuclaw_home);
+        fs::create_dir_all(format!("{}/skills/external-test", test_nuclaw_home))
+            .expect("Failed to create external skills dir");
+
+        let skill_md = r#"---
+name: external-test
+description: An externally loaded skill
+---
+
+# External Skill
+
+Loaded from external directory."#;
+
+        fs::write(
+            format!("{}/skills/external-test/SKILL.md", test_nuclaw_home),
+            skill_md,
+        )
+        .expect("Failed to write SKILL.md");
+
+        std::env::set_var("NUCLAW_HOME", test_nuclaw_home);
+
+        let registry = builtin_skills();
+
+        assert!(registry.get("external-test").is_some());
+
+        std::env::remove_var("NUCLAW_HOME");
+        let _ = fs::remove_dir_all(test_nuclaw_home);
+    }
+
+    #[test]
+    fn test_skill_validation_errors() {
+        use nuclaw::skills::Skill;
+        use nuclaw::skills::SkillValidationError;
+        use std::path::PathBuf;
+
+        let mut skill = Skill::new("", "Valid description", "Content");
+        skill.path = Some(PathBuf::from("test"));
+        let errors = skill.validate();
+        assert!(errors.contains(&SkillValidationError::NameEmpty));
+
+        let long_name = "a".repeat(65);
+        let mut skill2 = Skill::new(long_name, "Valid description", "Content");
+        skill2.path = Some(PathBuf::from("test"));
+        let errors2 = skill2.validate();
+        assert!(errors2.contains(&SkillValidationError::NameTooLong));
+
+        let long_desc = "a".repeat(1025);
+        let skill3 = Skill::new("valid", long_desc, "Content");
+        let errors3 = skill3.validate();
+        assert!(errors3.contains(&SkillValidationError::DescriptionTooLong));
+    }
+
+    #[test]
+    fn test_skill_name_validation() {
+        use nuclaw::skills::Skill;
+        use nuclaw::skills::SkillValidationError;
+        use std::path::PathBuf;
+
+        let invalid_names = vec!["-start", "end-", "double--hyphen", "UPPERCASE", "has space"];
+
+        for name in invalid_names {
+            let mut skill = Skill::new(name, "Valid description", "Content");
+            skill.path = Some(PathBuf::from(name));
+            let errors = skill.validate();
+            assert!(
+                errors.contains(&SkillValidationError::NameInvalidFormat),
+                "Name '{}' should be invalid",
+                name
+            );
+        }
+
+        let valid_names = vec!["valid", "valid-name", "name-123", "a"];
+
+        for name in valid_names {
+            let skill = Skill::new(name, "Valid description", "Content");
+            let errors = skill.validate();
+            assert!(
+                !errors.contains(&SkillValidationError::NameInvalidFormat),
+                "Name '{}' should be valid",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_skill_compatibility_validation() {
+        use nuclaw::skills::Skill;
+        use nuclaw::skills::SkillValidationError;
+
+        let long_compat = "a".repeat(501);
+        let skill = Skill::new("test", "Description", "Content");
+        let _skill_with_compat = Skill {
+            compatibility: Some(long_compat),
+            ..skill
+        };
+    }
+
+    #[test]
+    fn test_builtin_skills_valid() {
+        use nuclaw::skills::builtin_skills;
+
+        let registry = builtin_skills();
+
+        for name in registry.names() {
+            let skill = registry.get(&name).unwrap();
+            assert!(
+                skill.is_valid(),
+                "Built-in skill '{}' should be valid",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_skill_registry_traits() {
+        use nuclaw::skills::{builtin_skills, SkillRegistry};
+
+        let registry = builtin_skills();
+
+        let names = registry.names();
+        assert!(!names.is_empty());
+
+        let all_skills = registry.list();
+        assert_eq!(all_skills.len(), names.len());
+
+        for skill in &all_skills {
+            assert!(registry.get(&skill.name).is_some());
+        }
     }
 }
