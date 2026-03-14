@@ -2,6 +2,33 @@ use std::fs;
 use std::path::Path;
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Platform {
+    #[default]
+    Auto,
+    Cpu,
+    Nvidia,
+    AmdMps,
+}
+
+impl Platform {
+    pub fn detect() -> Self {
+        #[cfg(target_os = "macos")]
+        return Platform::AmdMps;
+        #[cfg(not(target_os = "macos"))]
+        return Platform::Cpu;
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Platform::Auto => "auto",
+            Platform::Cpu => "CPU",
+            Platform::Nvidia => "NVIDIA GPU",
+            Platform::AmdMps => "Apple MPS",
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ProgramError {
     #[error("Failed to read program: {0}")]
@@ -16,6 +43,7 @@ pub struct Program {
     pub description: String,
     pub content: String,
     pub compatibility: Option<String>,
+    pub platform: Platform,
 }
 
 impl Program {
@@ -46,6 +74,7 @@ impl Program {
         let mut name = "autoresearch".to_string();
         let mut description = String::new();
         let mut compatibility = None;
+        let mut platform = Platform::Auto;
 
         for line in frontmatter.lines() {
             let line = line.trim();
@@ -55,6 +84,13 @@ impl Program {
                 description = s.trim().to_string();
             } else if let Some(s) = line.strip_prefix("compatibility:") {
                 compatibility = Some(s.trim().to_string());
+            } else if let Some(s) = line.strip_prefix("platform:") {
+                platform = match s.trim().to_lowercase().as_str() {
+                    "cpu" => Platform::Cpu,
+                    "nvidia" | "gpu" => Platform::Nvidia,
+                    "mps" | "apple" | "macos" => Platform::AmdMps,
+                    _ => Platform::Auto,
+                };
             }
         }
 
@@ -66,6 +102,7 @@ impl Program {
                 description
             },
             compatibility,
+            platform,
             content: body,
         })
     }
@@ -82,6 +119,7 @@ impl Program {
             },
             description: "Auto research program".to_string(),
             compatibility: None,
+            platform: Platform::Auto,
             content: content.to_string(),
         })
     }
@@ -90,9 +128,14 @@ impl Program {
         Self {
             name: "autoresearch".to_string(),
             description: "Default auto research program".to_string(),
-            compatibility: Some("Single GPU, Python 3.10+".to_string()),
-            content: Default::default(),
+            compatibility: Some("CPU/MPS/GPU - Python 3.10+".to_string()),
+            platform: Platform::detect(),
+            content: String::new(),
         }
+    }
+
+    pub fn platform_name(&self) -> &str {
+        self.platform.name()
     }
 }
 
@@ -112,16 +155,20 @@ mod tests {
         let content = r#"---
 name: my-research
 description: Test program
+platform: cpu
 ---
 # Body"#;
         let program = Program::parse(content).unwrap();
         assert_eq!(program.name, "my-research");
-        assert_eq!(program.description, "Test program");
+        assert_eq!(program.platform, Platform::Cpu);
     }
 
     #[test]
-    fn test_default() {
-        let program = Program::default_program();
-        assert_eq!(program.name, "autoresearch");
+    fn test_platform_detect() {
+        let platform = Platform::detect();
+        #[cfg(target_os = "macos")]
+        assert_eq!(platform, Platform::AmdMps);
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(platform, Platform::Cpu);
     }
 }

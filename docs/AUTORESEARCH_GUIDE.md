@@ -1,16 +1,18 @@
 # NuClaw AutoResearch 模块使用指南
 
-**NuClaw AutoResearch** - 自主 LLM 训练实验自动化模块
+**NuClaw AutoResearch** - 自主 LLM/ML 训练实验自动化模块
 
 ---
 
 ## 1. 概述
 
-AutoResearch 模块赋予 AI Agent 自主进行 LLM 训练实验的能力:
+AutoResearch 模块赋予 AI Agent 自主进行训练实验的能力:
 
 ```
 修改代码 → 训练 → 评估 → 保留/丢弃 → 重复
 ```
+
+**无需 GPU! 支持 CPU/MPS (Apple Silicon) / NVIDIA GPU**
 
 基于 [AutoSearch](https://github.com/ClawTechForEric/autoresearch) 概念设计。
 
@@ -57,7 +59,16 @@ runner.run_full_loop(|iter, best| {
 | early_stop_patience | 5 | 早停耐心值 |
 | output_dir | experiments | 输出目录 |
 
-### 3.2 支持的指标
+### 3.2 支持的平台
+
+| 平台 | 说明 |
+|------|------|
+| CPU | Linux/x86_64, 通用计算 (默认) |
+| MPS | Apple Silicon (M1/M2/M3) |
+| GPU | NVIDIA GPU (CUDA) |
+| Auto | 自动检测当前平台 |
+
+### 3.3 支持的指标
 
 | 指标 | 说明 |
 |------|------|
@@ -72,12 +83,16 @@ runner.run_full_loop(|iter, best| {
 ```yaml
 ---
 name: my-research
-description: Optimize LLM training hyperparameters
-compatibility: Single GPU, Python 3.10+
+description: Optimize training hyperparameters
+platform: cpu
+compatibility: CPU/MPS/GPU - Python 3.10+
 ---
 
 # Research Goal
 找到最优的超参数组合来提升模型性能。
+
+# 平台说明
+platform: cpu  # 可选: cpu, mps, gpu, auto
 
 # 修改策略
 1. 调整学习率 (1e-5 到 1e-3)
