@@ -48,6 +48,33 @@ pub fn config_path() -> PathBuf {
     nuclaw_home().join("config.json")
 }
 
+/// Load .env file into environment variables (if exists)
+/// Only sets env vars that are not already set
+pub fn load_env_file() {
+    use std::fs;
+
+    let env_path = nuclaw_home().join(".env");
+    if !env_path.exists() {
+        return;
+    }
+
+    if let Ok(content) = fs::read_to_string(&env_path) {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+                if env::var(key).is_err() {
+                    env::set_var(key, value);
+                }
+            }
+        }
+    }
+}
+
 pub fn assistant_name() -> String {
     env::var("ASSISTANT_NAME").unwrap_or_else(|_| "Andy".to_string())
 }

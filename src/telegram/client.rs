@@ -4,11 +4,14 @@ use crate::config::{assistant_name, data_dir};
 use crate::container_runner::{container_timeout, run_container};
 use crate::db::Database;
 use crate::error::{NuClawError, Result};
+use crate::telegram::pairing::PairingManager;
 use crate::telegram::policy::{DMPolicy, GroupPolicy};
 use crate::telegram::types::TelegramMessage;
 use crate::telegram::utils::{extract_chat_id_pure, DEFAULT_TEXT_CHUNK_LIMIT};
 use crate::types::{ContainerInput, NewMessage, RegisteredGroup, RouterState};
 use crate::utils::json::{load_json, save_json};
+
+const PAIRING_CODE_LENGTH: usize = 6;
 
 use axum::routing::{get, post};
 use axum::Json;
@@ -243,6 +246,13 @@ impl TelegramClient {
             return Ok(None);
         }
 
+        let content_trimmed = msg.content.trim().to_uppercase();
+        if content_trimmed.len() == PAIRING_CODE_LENGTH && content_trimmed.chars().all(|c| c.is_ascii_alphanumeric()) {
+            if let Some(response) = self.handle_pairing_code(&content_trimmed, msg).await? {
+                return Ok(Some(response));
+            }
+        }
+
         let (_, content) = match self.extract_trigger(&msg.content).await {
             Some((_, c)) => (String::new(), c),
             None => return Ok(None),
@@ -329,12 +339,54 @@ impl TelegramClient {
         crate::telegram::utils::chunk_text_pure(text, self.text_chunk_limit)
     }
 
-    async fn check_dm_policy(&self, _user_id: &str) -> Result<bool> {
+    async fn check_dm_policy(&self, user_id: &str) -> Result<bool> {
         match self.dm_policy {
             DMPolicy::Disabled => Ok(false),
             DMPolicy::Open => Ok(true),
-            DMPolicy::Allowlist | DMPolicy::Pairing => Ok(true),
+            DMPolicy::Allowlist => Ok(true),
+            DMPolicy::Pairing => {
+                let manager = PairingManager::new()?;
+                Ok(manager.is_authorized(user_id))
+            }
         }
+    }
+
+    async fn handle_pairing_code(&self, code: &str, msg: &NewMessage) -> Result<Option<String>> {
+        let chat_id = extract_chat_id_pure(&msg.chat_jid).ok_or_else(|| NuClawError::Telegram {
+            message: "Invalid chat jid".to_string(),
+        })?;
+
+        let mut manager = match PairingManager::new() {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Failed to load pairing manager: {}", e);
+                return Ok(Some("Pairing system unavailable. Please try again later.".to_string()));
+            }
+        };
+
+        if let Some(pending) = manager.verify_code(code)? {
+            if pending.user_id == "pending" || pending.user_id == msg.sender {
+                if let Err(e) = manager.authorize_user(pending.clone()) {
+                    error!("Failed to authorize user: {}", e);
+                    return Ok(Some("Authorization failed. Please try again.".to_string()));
+                }
+
+                let response = format!(
+                    "✅ Authorization successful!\n\nYou can now use {} in this chat.",
+                    self.assistant_name
+                );
+                self.send_message(&chat_id.to_string(), &response).await.ok();
+                return Ok(Some("✅ You have been authorized!".to_string()));
+            } else {
+                return Ok(Some("This code is not for you. Please request your own pairing code.".to_string()));
+            }
+        }
+
+        if manager.is_authorized(&msg.sender) {
+            return Ok(None);
+        }
+
+        Ok(Some("Invalid or expired pairing code. Please request a new one.".to_string()))
     }
 
     async fn is_allowed_group(&self, chat_jid: &str) -> Result<bool> {

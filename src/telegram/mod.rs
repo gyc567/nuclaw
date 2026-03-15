@@ -4,12 +4,14 @@
 //! Follows OpenClaw Telegram specification for message handling.
 
 pub mod client;
+pub mod pairing;
 pub mod policy;
 pub mod types;
 pub mod utils;
 
 pub use client::TelegramClient;
 pub use client::{load_registered_groups, load_router_state};
+pub use pairing::PairingManager;
 pub use policy::{ChunkMode, DMPolicy, GroupPolicy, ReplyMode, StreamMode};
 pub use types::{TelegramChat, TelegramMessage, TelegramUpdate, TelegramUser};
 pub use utils::{

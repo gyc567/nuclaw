@@ -198,18 +198,17 @@ pub fn run_onboard() -> Result<OnboardConfig> {
     // Save configuration
     if config.has_any_config() {
         save_config(&config)?;
-        println!("\n✓ Configuration saved to {}", env_file_path().display());
     } else {
         println!("\nNo configuration provided. Nothing to save.");
     }
 
     println!("\n=== Onboard Complete ===\n");
-    println!("To use NuClaw, either:");
-    println!(
-        "  1. Source the config: source {}",
-        env_file_path().display()
-    );
-    println!("  2. Or set environment variables manually");
+    println!("✓ Configuration saved to {}", env_file_path().display());
+    println!();
+    println!("Run 'nuclaw --start' to start the service");
+    println!("Run 'nuclaw --status' to check status");
+    println!("Run 'nuclaw --stop' to stop the service");
+    println!("Run 'nuclaw --restart' to restart the service");
     println!();
 
     Ok(config)
@@ -378,17 +377,30 @@ pub fn print_config_status() -> Result<()> {
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
 
-    fn setup_test_env() {
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn setup_test_env() -> String {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let test_dir = format!("/tmp/nuclaw_test_{}_{}", counter, std::process::id());
         env::remove_var("NUCLAW_HOME");
-        env::set_var("NUCLAW_HOME", "/tmp/nuclaw_test");
+        env::set_var("NUCLAW_HOME", &test_dir);
+        let _ = fs::create_dir_all(&test_dir);
+        test_dir
+    }
+
+    fn cleanup_test_dir(test_dir: &str) {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let _ = fs::remove_dir_all(test_dir);
     }
 
     #[test]
     fn test_openai_provider_config() {
-        setup_test_env();
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
-        let _ = fs::create_dir_all("/tmp/nuclaw_test");
+        let test_dir = setup_test_env();
 
         let content =
             "OPENAI_API_KEY=sk-openai-test\nOPENAI_BASE_URL=https://custom.openai.com/v1\n";
@@ -403,7 +415,7 @@ mod tests {
             Some("https://custom.openai.com/v1".to_string())
         );
 
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        cleanup_test_dir(&test_dir);
     }
 
     #[test]
@@ -436,9 +448,8 @@ mod tests {
 
     #[test]
     fn test_save_and_load_config() {
-        setup_test_env();
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
-        let _ = fs::create_dir_all("/tmp/nuclaw_test");
+        let test_dir = setup_test_env();
+        let _ = fs::create_dir_all(&test_dir);
 
         let config = OnboardConfig {
             provider: Some("anthropic".to_string()),
@@ -455,14 +466,13 @@ mod tests {
         assert_eq!(loaded.base_url, config.base_url);
         assert_eq!(loaded.telegram_token, config.telegram_token);
 
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        cleanup_test_dir(&test_dir);
     }
 
     #[test]
     fn test_custom_provider_config() {
-        setup_test_env();
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
-        let _ = fs::create_dir_all("/tmp/nuclaw_test");
+        let test_dir = setup_test_env();
+        let _ = fs::create_dir_all(&test_dir);
 
         let content =
             "CUSTOM_API_KEY=sk-custom-test\nCUSTOM_BASE_URL=https://custom.endpoint.com/v1\n";
@@ -477,14 +487,13 @@ mod tests {
             Some("https://custom.endpoint.com/v1".to_string())
         );
 
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        cleanup_test_dir(&test_dir);
     }
 
     #[test]
     fn test_load_config_with_comments() {
-        setup_test_env();
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
-        let _ = fs::create_dir_all("/tmp/nuclaw_test");
+        let test_dir = setup_test_env();
+        let _ = fs::create_dir_all(&test_dir);
 
         let content = r#"
 # NuClaw Configuration
@@ -510,13 +519,13 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
         );
         assert_eq!(config.telegram_token, Some("123456:ABC-DEF".to_string()));
 
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        cleanup_test_dir(&test_dir);
     }
 
     #[test]
     fn test_save_config_creates_directory() {
-        setup_test_env();
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        let test_dir = setup_test_env();
+        let _ = fs::remove_dir_all(&test_dir);
 
         let config = OnboardConfig {
             provider: Some("anthropic".to_string()),
@@ -529,14 +538,13 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
 
         assert!(env_file_path().exists());
 
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        cleanup_test_dir(&test_dir);
     }
 
     #[test]
     fn test_load_config_partial() {
-        setup_test_env();
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
-        let _ = fs::create_dir_all("/tmp/nuclaw_test");
+        let test_dir = setup_test_env();
+        let _ = fs::create_dir_all(&test_dir);
 
         let content = "ANTHROPIC_API_KEY=sk-test-only\n";
         fs::write(env_file_path(), content).unwrap();
@@ -548,13 +556,13 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
         assert!(config.base_url.is_none());
         assert!(config.telegram_token.is_none());
 
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        cleanup_test_dir(&test_dir);
     }
 
     #[test]
     fn test_save_config_overwrites() {
-        setup_test_env();
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        let test_dir = setup_test_env();
+        let _ = fs::remove_dir_all(&test_dir);
 
         let config1 = OnboardConfig {
             provider: Some("anthropic".to_string()),
@@ -578,6 +586,6 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
         assert_eq!(loaded.api_key, Some("key2".to_string()));
         assert_eq!(loaded.telegram_token, Some("tele-token".to_string()));
 
-        let _ = fs::remove_dir_all("/tmp/nuclaw_test");
+        cleanup_test_dir(&test_dir);
     }
 }

@@ -508,7 +508,10 @@ main() {
     echo ""
 
     # 执行部署步骤
+# Skip root check in CI/automated environments
+if [[ -z "${CI:-}" ]]; then
     check_root
+fi
     check_os
     check_rust || install_rust
     install_system_deps

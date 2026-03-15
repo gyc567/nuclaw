@@ -37,11 +37,35 @@ struct Args {
 
     #[structopt(long)]
     onboard: bool,
+
+    #[structopt(long)]
+    start: bool,
+
+    #[structopt(long)]
+    stop: bool,
+
+    #[structopt(long)]
+    restart: bool,
+
+    #[structopt(long)]
+    status: bool,
+
+    #[structopt(long)]
+    telegram_pair: bool,
+
+    #[structopt(long)]
+    telegram_pair_list: bool,
+
+    #[structopt(long)]
+    telegram_pair_revoke: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::from_args();
+
+    // Load .env file if exists (auto-loaded for convenience)
+    config::load_env_file();
 
     // Initialize logging
     logging::init();
@@ -61,7 +85,21 @@ async fn main() -> Result<()> {
     info!("Database initialized successfully");
 
     // Handle different modes
-    if args.scheduler {
+    if args.start {
+        run_start_command()?;
+    } else if args.stop {
+        run_stop_command()?;
+    } else if args.restart {
+        run_restart_command()?;
+    } else if args.status {
+        run_status_command()?;
+    } else if args.telegram_pair {
+        run_telegram_pair_command()?;
+    } else if args.telegram_pair_list {
+        run_telegram_pair_list_command()?;
+    } else if args.telegram_pair_revoke.is_some() {
+        run_telegram_pair_revoke_command(args.telegram_pair_revoke.unwrap())?;
+    } else if args.scheduler {
         // Run task scheduler
         run_scheduler(db).await?;
     } else if args.whatsapp {
@@ -198,5 +236,201 @@ async fn run_telegram_bot(db: db::Database) -> Result<()> {
     // Start webhook server
     client.start_webhook_server().await?;
 
+    Ok(())
+}
+
+fn pid_file_path() -> std::path::PathBuf {
+    config::nuclaw_home().join("nuclaw.pid")
+}
+
+fn read_pid() -> Option<u32> {
+    std::fs::read_to_string(pid_file_path())
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+fn write_pid(pid: u32) -> std::io::Result<()> {
+    std::fs::write(pid_file_path(), pid.to_string())
+}
+
+fn remove_pid_file() -> std::io::Result<()> {
+    std::fs::remove_file(pid_file_path())
+}
+
+fn is_process_running(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn run_start_command() -> Result<()> {
+    config::load_env_file();
+    
+    if let Some(pid) = read_pid() {
+        if is_process_running(pid) {
+            println!("NuClaw is already running (PID: {})", pid);
+            println!("Use 'nuclaw --restart' to restart");
+            return Ok(());
+        } else {
+            let _ = remove_pid_file();
+        }
+    }
+    
+    let exe_path = std::env::current_exe()
+        .map_err(|e| NuClawError::FileSystem { message: e.to_string() })?;
+    
+    let child = std::process::Command::new(&exe_path)
+        .spawn()
+        .map_err(|e| NuClawError::FileSystem { message: e.to_string() })?;
+    
+    let pid = child.id();
+    write_pid(pid).map_err(|e| NuClawError::FileSystem { message: e.to_string() })?;
+    
+    println!("✓ NuClaw started (PID: {})", pid);
+    println!("  Use 'nuclaw --status' to check status");
+    println!("  Use 'nuclaw --stop' to stop");
+    println!("  Use 'nuclaw --restart' to restart");
+    
+    Ok(())
+}
+
+fn run_stop_command() -> Result<()> {
+    if let Some(pid) = read_pid() {
+        if is_process_running(pid) {
+            println!("Stopping NuClaw (PID: {})...", pid);
+            std::process::Command::new("kill")
+                .arg(pid.to_string())
+                .output()
+                .map_err(|e| NuClawError::FileSystem { message: e.to_string() })?;
+            
+            for _ in 0..10 {
+                if !is_process_running(pid) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            
+            if is_process_running(pid) {
+                std::process::Command::new("kill")
+                    .arg("-9")
+                    .arg(pid.to_string())
+                    .output()
+                    .ok();
+            }
+            
+            remove_pid_file().ok();
+            println!("✓ NuClaw stopped");
+        } else {
+            println!("NuClaw is not running (stale PID file)");
+            remove_pid_file().ok();
+        }
+    } else {
+        println!("NuClaw is not running");
+    }
+    
+    Ok(())
+}
+
+fn run_restart_command() -> Result<()> {
+    run_stop_command()?;
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    run_start_command()
+}
+
+fn run_status_command() -> Result<()> {
+    if let Some(pid) = read_pid() {
+        if is_process_running(pid) {
+            println!("╔══════════════════════════════════════════════════════════════╗");
+            println!("║                        NuClaw Status                        ║");
+            println!("╠══════════════════════════════════════════════════════════════╣");
+            println!("║  Status:    Running                                         ║");
+            println!("║  PID:       {}                                             ║", pid);
+            println!("╚══════════════════════════════════════════════════════════════╝");
+        } else {
+            println!("NuClaw is not running (stale PID file: {})", pid);
+            remove_pid_file().ok();
+        }
+    } else {
+        println!("NuClaw is not running");
+        println!("Run 'nuclaw --start' to start the service");
+    }
+    
+    Ok(())
+}
+
+fn run_telegram_pair_command() -> Result<()> {
+    use nuclaw::telegram::PairingManager;
+    
+    let _bot_token = std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| NuClawError::Config {
+        message: "TELEGRAM_BOT_TOKEN not set".to_string(),
+    })?;
+    
+    let mut manager = PairingManager::new()?;
+    let code = manager.generate_code("pending", 0)?;
+    
+    println!();
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!("║                     Pairing Information                   ║");
+    println!("╠════════════════════════════════════════════════════════════╣");
+    println!("║  Pairing Code: {}                                       ║", code);
+    println!("║  Expires in: 10 minutes                                 ║");
+    println!("║                                                              ║");
+    println!("║  Instructions:                                           ║");
+    println!("║  1. Open Telegram and find your Bot                      ║");
+    println!("║  2. Send the pairing code: {}                         ║", code);
+    println!("║  3. Wait for authorization confirmation                 ║");
+    println!("╚══════════════════════════════════════════════════════════════╝");
+    println!();
+    println!("Note: When a user sends the pairing code to the bot,");
+    println!("      they will be automatically authorized.");
+    println!();
+    println!("The bot must be running to complete pairing.");
+    println!("Run 'nuclaw --telegram' to start the bot, or");
+    println!("run 'nuclaw --start' if you want the full service.");
+    
+    Ok(())
+}
+
+fn run_telegram_pair_list_command() -> Result<()> {
+    use nuclaw::telegram::PairingManager;
+    
+    let manager = PairingManager::new()?;
+    let authorized = manager.list_authorized();
+    
+    if authorized.is_empty() {
+        println!("No authorized users.");
+        println!("Run 'nuclaw --telegram-pair' to generate a pairing code.");
+    } else {
+        println!();
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║                   Authorized Users                        ║");
+        println!("╠════════════════════════════════════════════════════════════╣");
+        for user in authorized {
+            println!("║  User ID: {}                                          ║", user.user_id);
+            println!("║  Chat ID: {}                                          ║", user.chat_id);
+            println!("║  Authorized: {}                                        ║", user.authorized_at);
+            println!("╟──────────────────────────────────────────────────────────────╢");
+        }
+        println!("╚══════════════════════════════════════════════════════════════╝");
+    }
+    
+    Ok(())
+}
+
+fn run_telegram_pair_revoke_command(user_id: String) -> Result<()> {
+    use nuclaw::telegram::PairingManager;
+    
+    let mut manager = PairingManager::new()?;
+    if manager.deauthorize_user(&user_id)? {
+        println!("✓ User {} revoked successfully.", user_id);
+    } else {
+        println!("User {} not found.", user_id);
+    }
+    
     Ok(())
 }
