@@ -36,6 +36,9 @@ pub enum NuClawError {
 
     #[error("Scheduler error: {message}")]
     Scheduler { message: String },
+
+    #[error("Security error: {message}")]
+    Security { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, NuClawError>;
@@ -133,6 +136,9 @@ mod tests {
             message: "test".to_string(),
         };
         let _ = NuClawError::Scheduler {
+            message: "test".to_string(),
+        };
+        let _ = NuClawError::Security {
             message: "test".to_string(),
         };
     }

@@ -19,7 +19,7 @@ use nuclaw::whatsapp;
 
 use structopt::StructOpt;
 use tokio::signal;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(StructOpt, Debug)]
 struct Args {
@@ -126,8 +126,10 @@ async fn main() -> Result<()> {
 async fn run_main_application(db: db::Database) -> Result<()> {
     info!("Running main application...");
 
-    // Ensure container system is running
-    ensure_container_system_running().ok();
+    // Ensure container system is running and log any errors
+    if let Err(e) = ensure_container_system_running() {
+        warn!("Container system not available: {}. Continuing anyway...", e);
+    }
 
     // Setup signal handlers for graceful shutdown
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -316,11 +318,13 @@ fn run_stop_command() -> Result<()> {
             }
             
             if is_process_running(pid) {
-                std::process::Command::new("kill")
+                if let Err(e) = std::process::Command::new("kill")
                     .arg("-9")
                     .arg(pid.to_string())
                     .output()
-                    .ok();
+                {
+                    warn!("Failed to kill process {}: {}", pid, e);
+                }
             }
             
             remove_pid_file().ok();

@@ -109,8 +109,52 @@ fn write_ipc_files(group_folder: &str, input: &ContainerInput) -> Result<()> {
     Ok(())
 }
 
+/// Validate group_folder to prevent path traversal attacks
+fn validate_group_folder(group_folder: &str) -> Result<()> {
+    // Check for null bytes
+    if group_folder.contains('\0') {
+        return Err(NuClawError::Security {
+            message: "Invalid group folder: contains null byte".to_string(),
+        });
+    }
+
+    // Check for parent directory traversal
+    if group_folder.contains("..") {
+        return Err(NuClawError::Security {
+            message: "Invalid group folder: parent directory traversal not allowed".to_string(),
+        });
+    }
+
+    // Check for absolute paths
+    if group_folder.starts_with('/') || group_folder.starts_with('\\') {
+        return Err(NuClawError::Security {
+            message: "Invalid group folder: absolute paths not allowed".to_string(),
+        });
+    }
+
+    // Check for other dangerous characters
+    let dangerous_chars = ['&', '|', ';', '$', '`', '\n', '\r'];
+    if group_folder.chars().any(|c| dangerous_chars.contains(&c)) {
+        return Err(NuClawError::Security {
+            message: "Invalid group folder: contains dangerous characters".to_string(),
+        });
+    }
+
+    // Limit length
+    if group_folder.len() > 64 {
+        return Err(NuClawError::Security {
+            message: "Invalid group folder: name too long (max 64 chars)".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
 /// Prepare group context directory
 fn prepare_group_context(group_folder: &str) -> Result<PathBuf> {
+    // Validate input first
+    validate_group_folder(group_folder)?;
+
     let group_dir = groups_dir().join(group_folder);
     if !group_dir.exists() {
         fs::create_dir_all(&group_dir).map_err(|e| NuClawError::FileSystem {
@@ -185,10 +229,9 @@ async fn build_container_command(
         }
 
         cmd.arg("--entrypoint")
-            .arg("/bin/sh")
+            .arg("/usr/local/bin/claude")
             .arg(image)
-            .arg("-c")
-            .arg("cat /workspace/input.json | /usr/local/bin/claude");
+            .arg("/workspace/input.json");
     }
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -207,7 +250,11 @@ async fn run_container_with_output(
     if let Some(mut stdin) = child.stdin.take() {
         let input_path = data_dir().join("temp/input.json");
         if input_path.exists() {
-            let input_content = fs::read_to_string(&input_path).unwrap_or_default();
+            let input_content = fs::read_to_string(&input_path).map_err(|e| {
+                NuClawError::Container {
+                    message: format!("Failed to read input file: {}", e),
+                }
+            })?;
             stdin
                 .write_all(input_content.as_bytes())
                 .await
@@ -356,10 +403,12 @@ pub fn log_container_output(
         "error": output.error,
         "new_session_id": output.new_session_id,
     });
-    fs::write(
-        &log_path,
-        serde_json::to_string_pretty(&log_data).unwrap_or_default(),
-    )
+    let json_content = serde_json::to_string_pretty(&log_data).map_err(|e| {
+        NuClawError::Container {
+            message: format!("Failed to serialize log data: {}", e),
+        }
+    })?;
+    fs::write(&log_path, json_content)
     .map_err(|e| NuClawError::FileSystem {
         message: format!("Failed to write log file: {}", e),
     })?;
@@ -768,41 +817,52 @@ impl ContainerPool {
             return None;
         }
 
-        {
-            let mut containers = self.containers.lock().await;
+        let mut containers = self.containers.lock().await;
 
-            for (id, container) in containers.iter_mut() {
-                if !container.in_use && container.group_folder == group_folder {
-                    container.in_use = true;
-                    return Some(PooledContainer {
-                        inner: Arc::new(Mutex::new(container.clone())),
-                        pool: Arc::new(self.clone()),
-                    });
-                }
+        // First, try to find an available container
+        for (id, container) in containers.iter_mut() {
+            if !container.in_use && container.group_folder == group_folder {
+                container.in_use = true;
+                return Some(PooledContainer {
+                    inner: Arc::new(Mutex::new(container.clone())),
+                    pool: Arc::new(self.clone()),
+                });
             }
+        }
 
+        // Try to create a new container if under limit
+        // Double-check after acquiring lock to prevent race condition
+        if containers.len() < self.max_size {
+            let new_id = format!("{}{}", CONTAINER_NAME_PREFIX, containers.len());
+            let new_group_folder = group_folder.to_string();
+            
+            // Check again to avoid race condition
             if containers.len() < self.max_size {
-                let new_id = format!("{}{}", CONTAINER_NAME_PREFIX, containers.len());
+                // Release lock before async operation
                 drop(containers);
 
-                if start_pooled_container(&new_id, group_folder).await.is_ok() {
+                if start_pooled_container(&new_id, &new_group_folder).await.is_ok() {
                     let mut containers = self.containers.lock().await;
-                    containers.insert(
-                        new_id.clone(),
-                        PooledContainerInner {
-                            container_id: new_id.clone(),
-                            group_folder: group_folder.to_string(),
-                            in_use: true,
-                        },
-                    );
-                    return Some(PooledContainer {
-                        inner: Arc::new(Mutex::new(PooledContainerInner {
-                            container_id: new_id,
-                            group_folder: group_folder.to_string(),
-                            in_use: true,
-                        })),
-                        pool: Arc::new(self.clone()),
-                    });
+                    
+                    // Final check after acquiring lock
+                    if containers.len() < self.max_size {
+                        containers.insert(
+                            new_id.clone(),
+                            PooledContainerInner {
+                                container_id: new_id.clone(),
+                                group_folder: new_group_folder.clone(),
+                                in_use: true,
+                            },
+                        );
+                        return Some(PooledContainer {
+                            inner: Arc::new(Mutex::new(PooledContainerInner {
+                                container_id: new_id,
+                                group_folder: new_group_folder,
+                                in_use: true,
+                            })),
+                            pool: Arc::new(self.clone()),
+                        });
+                    }
                 }
             }
         }
@@ -959,9 +1019,8 @@ async fn run_container_in_pool(
             .arg("exec")
             .arg("-i")
             .arg(container_id)
-            .arg("/bin/sh")
-            .arg("-c")
-            .arg(format!("cat /workspace/input.json | /usr/local/bin/claude"))
+            .arg("/usr/local/bin/claude")
+            .arg("/workspace/input.json")
             .output()
             .map_err(|e| NuClawError::Container {
                 message: format!("Failed to execute container: {}", e),
@@ -1034,5 +1093,54 @@ mod container_pool_tests {
     async fn test_container_pool_release_noop_when_disabled() {
         let pool = ContainerPool::new();
         pool.release("any_id").await;
+    }
+}
+
+#[cfg(test)]
+mod security_validation_tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_group_folder_valid_names() {
+        assert!(validate_group_folder("default").is_ok());
+        assert!(validate_group_folder("my-group").is_ok());
+        assert!(validate_group_folder("group_123").is_ok());
+        assert!(validate_group_folder("a").is_ok());
+    }
+
+    #[test]
+    fn test_validate_group_folder_traversal() {
+        assert!(validate_group_folder("../etc").is_err());
+        assert!(validate_group_folder("group/../passwd").is_err());
+        assert!(validate_group_folder("group..parent").is_err());
+    }
+
+    #[test]
+    fn test_validate_group_folder_absolute_path() {
+        assert!(validate_group_folder("/etc/passwd").is_err());
+        assert!(validate_group_folder("\\windows\\system32").is_err());
+    }
+
+    #[test]
+    fn test_validate_group_folder_dangerous_chars() {
+        assert!(validate_group_folder("group;rm -rf").is_err());
+        assert!(validate_group_folder("group|cmd").is_err());
+        assert!(validate_group_folder("group&cmd").is_err());
+        assert!(validate_group_folder("group$cmd").is_err());
+        assert!(validate_group_folder("group\ncmd").is_err());
+    }
+
+    #[test]
+    fn test_validate_group_folder_null_byte() {
+        assert!(validate_group_folder("group\0").is_err());
+    }
+
+    #[test]
+    fn test_validate_group_folder_max_length() {
+        let long_name = "a".repeat(65);
+        assert!(validate_group_folder(&long_name).is_err());
+        
+        let valid_name = "a".repeat(64);
+        assert!(validate_group_folder(&valid_name).is_ok());
     }
 }

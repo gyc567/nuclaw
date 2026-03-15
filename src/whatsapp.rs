@@ -386,7 +386,9 @@ pub fn load_registered_groups() -> HashMap<String, RegisteredGroup> {
 /// Start the authentication flow
 pub async fn start_auth_flow() {
     let auth_path = store_dir().join("auth");
-    std::fs::create_dir_all(&auth_path).ok();
+    if let Err(e) = std::fs::create_dir_all(&auth_path) {
+        tracing::warn!("Failed to create auth directory: {}", e);
+    }
     info!("Use WHATSAPP_MCP_URL to configure WhatsApp connection");
 }
 

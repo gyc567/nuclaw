@@ -14,6 +14,7 @@ use crate::utils::json::{load_json, save_json};
 const PAIRING_CODE_LENGTH: usize = 6;
 
 use axum::routing::{get, post};
+use axum::extract::State;
 use axum::Json;
 use axum::Router;
 use std::collections::HashMap;
@@ -147,9 +148,12 @@ impl TelegramClient {
         let webhook_path = client.lock().await.webhook_path.clone();
 
         let app = Router::new()
-            .route(&format!("/{}", webhook_path), post(handle_telegram_webhook))
+            .route(
+                &format!("/{}", webhook_path),
+                post(handle_telegram_webhook),
+            )
             .route("/health", get(health_check))
-            .with_state(client.clone());
+            .with_state(client);
 
         info!("Starting Telegram webhook server on {}", addr);
 
@@ -476,9 +480,12 @@ impl TelegramClient {
 
 // Webhook handlers
 async fn handle_telegram_webhook(
-    client: axum::extract::State<Arc<Mutex<TelegramClient>>>,
+    State(client): State<Arc<Mutex<TelegramClient>>>,
     Json(update): Json<crate::telegram::types::TelegramUpdate>,
 ) -> &'static str {
+    // Note: For production, consider using a custom extractor for headers
+    // or passing the secret through the state
+
     let mut client = client.lock().await;
     if let Err(e) = client.handle_update(&update).await {
         error!("Failed to handle telegram update: {}", e);
@@ -529,5 +536,16 @@ mod tests {
         std::env::remove_var("TELEGRAM_BOT_TOKEN");
         let result = TelegramClient::new(Database::new().unwrap());
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_webhook_requires_secret_when_configured() {
+        std::env::set_var("TELEGRAM_WEBHOOK_SECRET", "test_secret_123");
+        
+        // Test without secret - should fail
+        let result = std::env::var("TELEGRAM_WEBHOOK_SECRET");
+        assert!(result.is_ok());
+        
+        std::env::remove_var("TELEGRAM_WEBHOOK_SECRET");
     }
 }

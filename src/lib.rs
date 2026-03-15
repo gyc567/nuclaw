@@ -21,6 +21,7 @@ pub mod maintenance;
 pub mod memory;
 pub mod observer;
 pub mod onboard;
+pub mod orchestrator;
 pub mod providers;
 pub mod security;
 pub mod skills;
@@ -29,6 +30,7 @@ pub mod telegram;
 pub mod types;
 pub mod utils;
 pub mod whatsapp;
+pub mod workflow;
 
 // Re-exports for convenience
 pub use agent_runner::{agent_runner_mode, create_runner, AgentRunner, AgentRunnerMode};
@@ -52,4 +54,11 @@ pub use telegram::{
 pub use autoresearch::{
     AutoResearchRunner, EvalError, Evaluator, ExperimentConfig, ExperimentHistory, ExperimentResult,
     Metric, Program, ProgramError, RunnerError,
+};
+pub use workflow::{WorkflowConfig, WorkflowLoader, WorkflowLoaderError, HookRunner, HookType};
+pub use orchestrator::{
+    Executor, ExecutorConfig, ExecutorEvent, ExecutorStats,
+    Metrics, MetricsSnapshot,
+    TaskQueue,
+    Task, TaskId, TaskResult, TaskSource, TaskStatus, Priority,
 };
