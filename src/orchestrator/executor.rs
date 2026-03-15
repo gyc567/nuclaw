@@ -92,7 +92,7 @@ impl Executor {
     {
         let poll_interval = Duration::from_millis(self.config.poll_interval_ms);
         let executor_fn = Arc::new(executor_fn);
-        
+
         loop {
             // Try to get a task from the queue
             if let Some(mut task) = self.queue.dequeue() {
@@ -100,37 +100,37 @@ impl Executor {
                 let metrics = Arc::clone(&self.metrics);
                 let queue = self.queue.clone();
                 let fn_clone = Arc::clone(&executor_fn);
-                
+
                 task.start();
                 self.metrics.record_task_started();
-                
+
                 // Execute task in background
                 tokio::spawn(async move {
                     let start = Instant::now();
-                    
+
                     // Run the task
                     let result = fn_clone(task.clone()).await;
-                    
+
                     let duration = start.elapsed().as_millis() as u64;
-                    
+
                     // Record metrics
                     if result.success {
                         metrics.record_task_completed(duration);
                     } else {
                         metrics.record_task_failed();
                     }
-                    
+
                     // Complete the task and potentially requeue for retry
                     if !result.success {
                         let mut task = task;
                         task.fail(result.error.clone().unwrap_or_default());
-                        
+
                         if task.can_retry() {
                             queue.requeue(task);
                             metrics.record_retry();
                         }
                     }
-                    
+
                     queue.complete();
                 });
             } else {
@@ -174,9 +174,9 @@ mod tests {
     }
 
     fn dummy_executor(task: Task) -> BoxFuture<'static, TaskResult> {
-        Box::pin(async move {
-            TaskResult::success(task.id, format!("processed: {}", task.payload), 10)
-        })
+        Box::pin(
+            async move { TaskResult::success(task.id, format!("processed: {}", task.payload), 10) },
+        )
     }
 
     #[test]
@@ -189,7 +189,7 @@ mod tests {
     fn test_executor_submit() {
         let executor = Executor::new(ExecutorConfig::default());
         executor.submit(create_test_task("test"));
-        
+
         assert_eq!(executor.queue().pending_count(), 1);
     }
 
@@ -201,9 +201,9 @@ mod tests {
             create_test_task("task2"),
             create_test_task("task3"),
         ];
-        
+
         executor.submit_many(tasks);
-        
+
         assert_eq!(executor.queue().pending_count(), 3);
     }
 
@@ -211,9 +211,9 @@ mod tests {
     fn test_executor_stats() {
         let executor = Executor::new(ExecutorConfig::default());
         executor.submit(create_test_task("test"));
-        
+
         let stats = executor.stats();
-        
+
         assert_eq!(stats.pending, 1);
         assert_eq!(stats.running, 0);
     }
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn test_executor_config_default() {
         let config = ExecutorConfig::default();
-        
+
         assert_eq!(config.max_concurrency, 3);
         assert_eq!(config.poll_interval_ms, 100);
         assert_eq!(config.max_retries, 3);
@@ -234,7 +234,7 @@ mod tests {
             poll_interval_ms: 50,
             max_retries: 10,
         };
-        
+
         assert_eq!(config.max_concurrency, 5);
         assert_eq!(config.poll_interval_ms, 50);
         assert_eq!(config.max_retries, 10);
@@ -246,7 +246,7 @@ mod tests {
             .with_source(TaskSource::Scheduled)
             .with_priority(Priority::Critical)
             .with_max_retries(5);
-        
+
         assert_eq!(task.payload, "test");
         assert_eq!(task.source, TaskSource::Scheduled);
         assert_eq!(task.priority, Priority::Critical);
@@ -260,10 +260,10 @@ mod tests {
             poll_interval_ms: 10,
             max_retries: 1,
         });
-        
+
         executor.submit(create_test_task("task1"));
         executor.submit(create_test_task("task2"));
-        
+
         // Run for a short time - spawn task but don't wait for it
         let executor_clone = Executor::new(ExecutorConfig {
             max_concurrency: 2,
@@ -272,14 +272,14 @@ mod tests {
         });
         executor_clone.submit(create_test_task("task1"));
         executor_clone.submit(create_test_task("task2"));
-        
+
         let _handle = tokio::spawn(async move {
             let _ = executor_clone.run(dummy_executor).await;
         });
-        
+
         // Give some time for tasks to be processed
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         // Check stats - original executor has submitted tasks
         let stats = executor.stats();
         assert!(stats.total_submitted >= 2);

@@ -43,7 +43,8 @@ impl Metrics {
     /// Record a task completed
     pub fn record_task_completed(&self, duration_ms: u64) {
         self.completed.fetch_add(1, Ordering::Relaxed);
-        self.total_duration_ms.fetch_add(duration_ms, Ordering::Relaxed);
+        self.total_duration_ms
+            .fetch_add(duration_ms, Ordering::Relaxed);
     }
 
     /// Record a task failed
@@ -105,11 +106,11 @@ impl Metrics {
         let completed = self.total_completed();
         let failed = self.total_failed();
         let total = completed + failed;
-        
+
         if total == 0 {
             return 1.0;
         }
-        
+
         completed as f64 / total as f64
     }
 
@@ -119,7 +120,7 @@ impl Metrics {
         if uptime_secs == 0.0 {
             return 0.0;
         }
-        
+
         let total = self.total_completed() + self.total_failed();
         total as f64 / uptime_secs
     }
@@ -169,7 +170,7 @@ mod tests {
     #[test]
     fn test_metrics_new() {
         let metrics = Metrics::new();
-        
+
         assert_eq!(metrics.total_submitted(), 0);
         assert_eq!(metrics.total_started(), 0);
         assert_eq!(metrics.total_completed(), 0);
@@ -180,33 +181,33 @@ mod tests {
     #[test]
     fn test_metrics_record_submitted() {
         let metrics = Metrics::new();
-        
+
         metrics.record_task_submitted();
         metrics.record_task_submitted();
         metrics.record_task_submitted();
-        
+
         assert_eq!(metrics.total_submitted(), 3);
     }
 
     #[test]
     fn test_metrics_record_started() {
         let metrics = Metrics::new();
-        
+
         metrics.record_task_started();
         metrics.record_task_started();
-        
+
         assert_eq!(metrics.total_started(), 2);
     }
 
     #[test]
     fn test_metrics_record_completed() {
         let metrics = Metrics::new();
-        
+
         metrics.record_task_started();
         metrics.record_task_completed(100);
         metrics.record_task_started();
         metrics.record_task_completed(200);
-        
+
         assert_eq!(metrics.total_completed(), 2);
         assert_eq!(metrics.total_duration_ms(), 300);
         assert_eq!(metrics.avg_duration_ms(), 150);
@@ -215,42 +216,42 @@ mod tests {
     #[test]
     fn test_metrics_record_failed() {
         let metrics = Metrics::new();
-        
+
         metrics.record_task_started();
         metrics.record_task_failed();
         metrics.record_task_started();
         metrics.record_task_failed();
-        
+
         assert_eq!(metrics.total_failed(), 2);
     }
 
     #[test]
     fn test_metrics_record_retry() {
         let metrics = Metrics::new();
-        
+
         metrics.record_retry();
         metrics.record_retry();
         metrics.record_retry();
-        
+
         assert_eq!(metrics.total_retries(), 3);
     }
 
     #[test]
     fn test_metrics_success_rate() {
         let metrics = Metrics::new();
-        
+
         // No tasks yet - should be 1.0
         assert_eq!(metrics.success_rate(), 1.0);
-        
+
         // Some completed, no failures
         metrics.record_task_started();
         metrics.record_task_completed(100);
         assert_eq!(metrics.success_rate(), 1.0);
-        
+
         // Add a failure
         metrics.record_task_started();
         metrics.record_task_failed();
-        
+
         // 1 completed, 1 failed = 0.5
         assert!((metrics.success_rate() - 0.5).abs() < 0.001);
     }
@@ -258,10 +259,10 @@ mod tests {
     #[test]
     fn test_metrics_avg_duration() {
         let metrics = Metrics::new();
-        
+
         // No completed tasks
         assert_eq!(metrics.avg_duration_ms(), 0);
-        
+
         // Add some completed tasks
         metrics.record_task_started();
         metrics.record_task_completed(100);
@@ -269,27 +270,27 @@ mod tests {
         metrics.record_task_completed(200);
         metrics.record_task_started();
         metrics.record_task_completed(300);
-        
+
         assert_eq!(metrics.avg_duration_ms(), 200);
     }
 
     #[test]
     fn test_metrics_throughput() {
         let metrics = Metrics::new();
-        
+
         // No tasks - throughput should be 0
         let initial = metrics.throughput();
         assert_eq!(initial, 0.0);
-        
+
         // Add some tasks
         metrics.record_task_started();
         metrics.record_task_completed(100);
         metrics.record_task_started();
         metrics.record_task_failed();
-        
+
         // After some time, throughput should be calculable
         std::thread::sleep(Duration::from_millis(10));
-        
+
         let throughput = metrics.throughput();
         assert!(throughput > 0.0);
     }
@@ -297,19 +298,19 @@ mod tests {
     #[test]
     fn test_metrics_snapshot() {
         let metrics = Metrics::new();
-        
+
         metrics.record_task_submitted();
         metrics.record_task_started();
         metrics.record_task_completed(100);
         metrics.record_task_started();
         metrics.record_task_failed();
         metrics.record_retry();
-        
+
         // Small delay to ensure uptime > 0
         std::thread::sleep(Duration::from_millis(1));
-        
+
         let snapshot = metrics.snapshot();
-        
+
         assert_eq!(snapshot.submitted, 1);
         assert_eq!(snapshot.started, 2);
         assert_eq!(snapshot.completed, 1);
@@ -323,9 +324,9 @@ mod tests {
     #[test]
     fn test_metrics_uptime() {
         let metrics = Metrics::new();
-        
+
         std::thread::sleep(Duration::from_millis(10));
-        
+
         let uptime = metrics.uptime();
         assert!(uptime.as_millis() >= 10);
     }
@@ -334,9 +335,9 @@ mod tests {
     fn test_metrics_clone() {
         let metrics = Metrics::new();
         metrics.record_task_submitted();
-        
+
         let cloned = metrics.clone();
-        
+
         assert_eq!(cloned.total_submitted(), 1);
     }
 }

@@ -250,11 +250,10 @@ async fn run_container_with_output(
     if let Some(mut stdin) = child.stdin.take() {
         let input_path = data_dir().join("temp/input.json");
         if input_path.exists() {
-            let input_content = fs::read_to_string(&input_path).map_err(|e| {
-                NuClawError::Container {
+            let input_content =
+                fs::read_to_string(&input_path).map_err(|e| NuClawError::Container {
                     message: format!("Failed to read input file: {}", e),
-                }
-            })?;
+                })?;
             stdin
                 .write_all(input_content.as_bytes())
                 .await
@@ -403,13 +402,11 @@ pub fn log_container_output(
         "error": output.error,
         "new_session_id": output.new_session_id,
     });
-    let json_content = serde_json::to_string_pretty(&log_data).map_err(|e| {
-        NuClawError::Container {
+    let json_content =
+        serde_json::to_string_pretty(&log_data).map_err(|e| NuClawError::Container {
             message: format!("Failed to serialize log data: {}", e),
-        }
-    })?;
-    fs::write(&log_path, json_content)
-    .map_err(|e| NuClawError::FileSystem {
+        })?;
+    fs::write(&log_path, json_content).map_err(|e| NuClawError::FileSystem {
         message: format!("Failed to write log file: {}", e),
     })?;
     Ok(())
@@ -835,15 +832,18 @@ impl ContainerPool {
         if containers.len() < self.max_size {
             let new_id = format!("{}{}", CONTAINER_NAME_PREFIX, containers.len());
             let new_group_folder = group_folder.to_string();
-            
+
             // Check again to avoid race condition
             if containers.len() < self.max_size {
                 // Release lock before async operation
                 drop(containers);
 
-                if start_pooled_container(&new_id, &new_group_folder).await.is_ok() {
+                if start_pooled_container(&new_id, &new_group_folder)
+                    .await
+                    .is_ok()
+                {
                     let mut containers = self.containers.lock().await;
-                    
+
                     // Final check after acquiring lock
                     if containers.len() < self.max_size {
                         containers.insert(
@@ -1139,7 +1139,7 @@ mod security_validation_tests {
     fn test_validate_group_folder_max_length() {
         let long_name = "a".repeat(65);
         assert!(validate_group_folder(&long_name).is_err());
-        
+
         let valid_name = "a".repeat(64);
         assert!(validate_group_folder(&valid_name).is_ok());
     }

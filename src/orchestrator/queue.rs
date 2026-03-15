@@ -1,7 +1,7 @@
 //! Task queue with priority and concurrency support
 
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::sync::{Arc, Mutex};
 
 use super::task::Task;
@@ -67,27 +67,27 @@ impl TaskQueue {
             *counter += 1;
             order
         };
-        
+
         let entry = TaskEntry {
             task,
             insertion_order: order,
         };
-        
+
         self.queue.lock().unwrap().push(entry);
     }
 
     /// Dequeue the next task if concurrency allows
     pub fn dequeue(&self) -> Option<Task> {
         let running = *self.running_count.lock().unwrap();
-        
+
         if running >= self.max_concurrency {
             return None;
         }
-        
+
         let entry = self.queue.lock().unwrap().pop()?;
-        
+
         *self.running_count.lock().unwrap() += 1;
-        
+
         Some(entry.task)
     }
 
@@ -128,7 +128,9 @@ impl TaskQueue {
 
     /// Get all pending tasks (for debugging/inspection)
     pub fn pending_tasks(&self) -> Vec<Task> {
-        self.queue.lock().unwrap()
+        self.queue
+            .lock()
+            .unwrap()
             .iter()
             .map(|e| e.task.clone())
             .collect()
@@ -143,7 +145,7 @@ impl TaskQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestrator::task::{TaskSource, Priority};
+    use crate::orchestrator::task::{Priority, TaskSource};
 
     fn create_test_task(payload: &str) -> Task {
         Task::new(payload.to_string())
@@ -163,10 +165,10 @@ mod tests {
     #[test]
     fn test_queue_enqueue_dequeue() {
         let queue = TaskQueue::new(2);
-        
+
         queue.enqueue(create_test_task("task1"));
         assert_eq!(queue.pending_count(), 1);
-        
+
         let task = queue.dequeue();
         assert!(task.is_some());
         assert_eq!(task.unwrap().payload, "task1");
@@ -177,7 +179,7 @@ mod tests {
     #[test]
     fn test_queue_empty_dequeue() {
         let queue = TaskQueue::new(2);
-        
+
         let task = queue.dequeue();
         assert!(task.is_none());
     }
@@ -185,11 +187,11 @@ mod tests {
     #[test]
     fn test_queue_complete() {
         let queue = TaskQueue::new(2);
-        
+
         queue.enqueue(create_test_task("task1"));
         let _task = queue.dequeue();
         assert_eq!(queue.running_count(), 1);
-        
+
         queue.complete();
         assert_eq!(queue.running_count(), 0);
     }
@@ -197,25 +199,28 @@ mod tests {
     #[test]
     fn test_queue_priority_ordering() {
         let queue = TaskQueue::new(10);
-        
+
         queue.enqueue(create_test_task_with_priority("low", Priority::Low));
         queue.enqueue(create_test_task_with_priority("high", Priority::High));
         queue.enqueue(create_test_task_with_priority("normal1", Priority::Normal));
         queue.enqueue(create_test_task_with_priority("normal2", Priority::Normal));
-        queue.enqueue(create_test_task_with_priority("critical", Priority::Critical));
-        
+        queue.enqueue(create_test_task_with_priority(
+            "critical",
+            Priority::Critical,
+        ));
+
         let task = queue.dequeue().unwrap();
         assert_eq!(task.payload, "critical");
-        
+
         let task = queue.dequeue().unwrap();
         assert_eq!(task.payload, "high");
-        
+
         let task = queue.dequeue().unwrap();
         assert!(task.payload == "normal1" || task.payload == "normal2");
-        
+
         let task = queue.dequeue().unwrap();
         assert!(task.payload == "normal1" || task.payload == "normal2");
-        
+
         let task = queue.dequeue().unwrap();
         assert_eq!(task.payload, "low");
     }
@@ -223,11 +228,11 @@ mod tests {
     #[test]
     fn test_queue_fifo_same_priority() {
         let queue = TaskQueue::new(10);
-        
+
         queue.enqueue(create_test_task("task1"));
         queue.enqueue(create_test_task("task2"));
         queue.enqueue(create_test_task("task3"));
-        
+
         assert_eq!(queue.dequeue().unwrap().payload, "task1");
         assert_eq!(queue.dequeue().unwrap().payload, "task2");
         assert_eq!(queue.dequeue().unwrap().payload, "task3");
@@ -236,24 +241,24 @@ mod tests {
     #[test]
     fn test_queue_concurrency_limit() {
         let queue = TaskQueue::new(2);
-        
+
         queue.enqueue(create_test_task("task1"));
         queue.enqueue(create_test_task("task2"));
         queue.enqueue(create_test_task("task3"));
-        
+
         let _t1 = queue.dequeue();
         let _t2 = queue.dequeue();
         assert_eq!(queue.running_count(), 2);
-        
+
         // Third task should not be available yet
         let t3 = queue.dequeue();
         assert!(t3.is_none());
-        
+
         assert!(queue.is_at_capacity());
-        
+
         queue.complete();
         assert!(!queue.is_at_capacity());
-        
+
         let t3 = queue.dequeue();
         assert!(t3.is_some());
         assert_eq!(t3.unwrap().payload, "task3");
@@ -262,26 +267,26 @@ mod tests {
     #[test]
     fn test_queue_total_count() {
         let queue = TaskQueue::new(2);
-        
+
         queue.enqueue(create_test_task("task1"));
         queue.enqueue(create_test_task("task2"));
-        
+
         let _ = queue.dequeue();
-        
+
         assert_eq!(queue.total_count(), 2); // 1 pending + 1 running
     }
 
     #[test]
     fn test_queue_peek() {
         let queue = TaskQueue::new(2);
-        
+
         queue.enqueue(create_test_task("task1"));
         queue.enqueue(create_test_task("task2"));
-        
+
         let peeked = queue.peek();
         assert!(peeked.is_some());
         assert_eq!(peeked.unwrap().payload, "task1");
-        
+
         // Peek doesn't remove
         assert_eq!(queue.pending_count(), 2);
     }
@@ -289,10 +294,10 @@ mod tests {
     #[test]
     fn test_queue_pending_tasks() {
         let queue = TaskQueue::new(2);
-        
+
         queue.enqueue(create_test_task("task1"));
         queue.enqueue(create_test_task("task2"));
-        
+
         let tasks = queue.pending_tasks();
         assert_eq!(tasks.len(), 2);
     }
@@ -300,13 +305,13 @@ mod tests {
     #[test]
     fn test_queue_requeue() {
         let queue = TaskQueue::new(2);
-        
+
         queue.enqueue(create_test_task("task1"));
         let mut task2 = create_test_task("task2");
         task2.start();
-        
+
         queue.requeue(task2);
-        
+
         assert_eq!(queue.pending_count(), 2);
     }
 }

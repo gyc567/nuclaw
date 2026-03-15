@@ -9,8 +9,12 @@
 pub mod config;
 pub mod hooks;
 pub mod loader;
+pub mod watcher;
 
 // Re-exports
-pub use config::{AgentSettings, ChannelConfig, ChannelSettings, ContainerSettings, HookSettings, WorkflowConfig};
+pub use config::{
+    AgentSettings, ChannelConfig, ChannelSettings, ContainerSettings, HookSettings, WorkflowConfig,
+};
 pub use hooks::{HookRunner, HookType};
 pub use loader::{WorkflowLoader, WorkflowLoaderError};
+pub use watcher::WorkflowWatcher;

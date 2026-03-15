@@ -1,7 +1,7 @@
 //! Hook runner for workspace lifecycle
 
-use std::process::Command;
 use std::path::Path;
+use std::process::Command;
 use thiserror::Error;
 
 use crate::workflow::config::HookSettings;
@@ -10,10 +10,10 @@ use crate::workflow::config::HookSettings;
 pub enum HookError {
     #[error("Hook execution failed: {0}")]
     ExecutionFailed(String),
-    
+
     #[error("Hook not found: {0}")]
     NotFound(String),
-    
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -48,13 +48,13 @@ impl HookRunner {
         if script.trim().is_empty() {
             return Ok(String::new());
         }
-        
+
         let output = Command::new("sh")
             .arg("-c")
             .arg(script)
             .current_dir(workspace_path)
             .output()?;
-        
+
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
@@ -62,7 +62,7 @@ impl HookRunner {
             Err(HookError::ExecutionFailed(stderr))
         }
     }
-    
+
     pub fn run_hooks(
         hook_type: HookType,
         settings: &HookSettings,
@@ -74,31 +74,28 @@ impl HookRunner {
             HookType::AfterRun => settings.after_run.as_deref(),
             HookType::BeforeRemove => settings.before_remove.as_deref(),
         };
-        
+
         match script {
             Some(s) if !s.trim().is_empty() => {
                 let output = Self::run_hook(hook_type, s, workspace_path)?;
                 Ok(vec![output])
-            },
+            }
             _ => Ok(vec![]),
         }
     }
-    
-    pub fn run_all_hooks(
-        settings: &HookSettings,
-        workspace_path: &Path,
-    ) -> Result<(), HookError> {
+
+    pub fn run_all_hooks(settings: &HookSettings, workspace_path: &Path) -> Result<(), HookError> {
         let hook_types = [
             HookType::AfterCreate,
             HookType::BeforeRun,
             HookType::AfterRun,
             HookType::BeforeRemove,
         ];
-        
+
         for hook_type in hook_types {
             Self::run_hooks(hook_type, settings, workspace_path)?;
         }
-        
+
         Ok(())
     }
 }
@@ -137,11 +134,8 @@ mod tests {
     fn test_run_hook_with_env_var() {
         let temp_dir = TempDir::new().unwrap();
         std::env::set_var("TEST_WORKSPACE", "test_value");
-        let result = HookRunner::run_hook(
-            HookType::BeforeRun,
-            "echo $TEST_WORKSPACE",
-            temp_dir.path(),
-        );
+        let result =
+            HookRunner::run_hook(HookType::BeforeRun, "echo $TEST_WORKSPACE", temp_dir.path());
         assert!(result.is_ok());
         assert!(result.unwrap().contains("test_value"));
         std::env::remove_var("TEST_WORKSPACE");
@@ -159,7 +153,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let mut settings = HookSettings::default();
         settings.before_run = Some("echo before".to_string());
-        
+
         let result = HookRunner::run_hooks(HookType::BeforeRun, &settings, temp_dir.path());
         assert!(result.is_ok());
         assert!(!result.unwrap().is_empty());
@@ -169,7 +163,7 @@ mod tests {
     fn test_run_hooks_skips_empty() {
         let temp_dir = TempDir::new().unwrap();
         let settings = HookSettings::default();
-        
+
         let result = HookRunner::run_hooks(HookType::BeforeRun, &settings, temp_dir.path());
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
@@ -181,7 +175,7 @@ mod tests {
         let mut settings = HookSettings::default();
         settings.after_create = Some("echo created".to_string());
         settings.before_run = Some("echo running".to_string());
-        
+
         let result = HookRunner::run_all_hooks(&settings, temp_dir.path());
         assert!(result.is_ok());
     }
@@ -189,10 +183,10 @@ mod tests {
     #[test]
     fn test_hook_runs_in_workspace_directory() {
         let temp_dir = TempDir::new().unwrap();
-        
+
         let script = "pwd";
         let result = HookRunner::run_hook(HookType::BeforeRun, script, temp_dir.path());
-        
+
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains(".tmp") || output.contains("Temp"));
@@ -201,13 +195,13 @@ mod tests {
     #[test]
     fn test_hook_multiline_script() {
         let temp_dir = TempDir::new().unwrap();
-        
+
         let script = r#"
 echo "line1"
 echo "line2"
 "#;
         let result = HookRunner::run_hook(HookType::BeforeRun, script, temp_dir.path());
-        
+
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("line1"));

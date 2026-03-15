@@ -167,7 +167,9 @@ impl Task {
     pub fn fail(&mut self, error: String) {
         if self.can_retry() {
             self.retry_count += 1;
-            self.status = TaskStatus::Retrying { attempt: self.retry_count };
+            self.status = TaskStatus::Retrying {
+                attempt: self.retry_count,
+            };
         } else {
             self.status = TaskStatus::Failed { error };
             self.completed_at = Some(chrono::Utc::now().to_rfc3339());
@@ -253,7 +255,9 @@ mod tests {
         let _ = TaskStatus::Pending;
         let _ = TaskStatus::Running;
         let _ = TaskStatus::Completed;
-        let _ = TaskStatus::Failed { error: "error".to_string() };
+        let _ = TaskStatus::Failed {
+            error: "error".to_string(),
+        };
         let _ = TaskStatus::Retrying { attempt: 1 };
     }
 
@@ -276,22 +280,19 @@ mod tests {
 
     #[test]
     fn test_task_with_source() {
-        let task = Task::new("test".to_string())
-            .with_source(TaskSource::Scheduled);
+        let task = Task::new("test".to_string()).with_source(TaskSource::Scheduled);
         assert_eq!(task.source, TaskSource::Scheduled);
     }
 
     #[test]
     fn test_task_with_priority() {
-        let task = Task::new("test".to_string())
-            .with_priority(Priority::High);
+        let task = Task::new("test".to_string()).with_priority(Priority::High);
         assert_eq!(task.priority, Priority::High);
     }
 
     #[test]
     fn test_task_with_max_retries() {
-        let task = Task::new("test".to_string())
-            .with_max_retries(5);
+        let task = Task::new("test".to_string()).with_max_retries(5);
         assert_eq!(task.max_retries, 5);
     }
 
@@ -299,10 +300,10 @@ mod tests {
     fn test_task_can_retry() {
         let mut task = Task::new("test".to_string());
         assert!(task.can_retry());
-        
+
         task.retry_count = 2;
         assert!(task.can_retry());
-        
+
         task.retry_count = 3;
         assert!(!task.can_retry());
     }
@@ -311,7 +312,7 @@ mod tests {
     fn test_task_start() {
         let mut task = Task::new("test".to_string());
         task.start();
-        
+
         assert_eq!(task.status, TaskStatus::Running);
         assert!(task.started_at.is_some());
     }
@@ -321,7 +322,7 @@ mod tests {
         let mut task = Task::new("test".to_string());
         task.start();
         task.complete();
-        
+
         assert_eq!(task.status, TaskStatus::Completed);
         assert!(task.completed_at.is_some());
     }
@@ -329,9 +330,9 @@ mod tests {
     #[test]
     fn test_task_fail_triggers_retry() {
         let mut task = Task::new("test".to_string()).with_max_retries(3);
-        
+
         task.fail("error 1".to_string());
-        
+
         match &task.status {
             TaskStatus::Retrying { attempt } => {
                 assert_eq!(*attempt, 1);
@@ -344,10 +345,10 @@ mod tests {
     #[test]
     fn test_task_fail_exhausts_retries() {
         let mut task = Task::new("test".to_string()).with_max_retries(2);
-        
+
         task.retry_count = 2; // Already at max
         task.fail("error".to_string());
-        
+
         match &task.status {
             TaskStatus::Failed { error } => {
                 assert_eq!(error, "error");
@@ -361,7 +362,7 @@ mod tests {
     fn test_task_result_success() {
         let id = TaskId::new();
         let result = TaskResult::success(id.clone(), "output".to_string(), 100);
-        
+
         assert!(result.success);
         assert_eq!(result.output, Some("output".to_string()));
         assert_eq!(result.error, None);
@@ -372,7 +373,7 @@ mod tests {
     fn test_task_result_failure() {
         let id = TaskId::new();
         let result = TaskResult::failure(id.clone(), "error".to_string(), 50);
-        
+
         assert!(!result.success);
         assert_eq!(result.output, None);
         assert_eq!(result.error, Some("error".to_string()));

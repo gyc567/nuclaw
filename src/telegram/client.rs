@@ -13,8 +13,8 @@ use crate::utils::json::{load_json, save_json};
 
 const PAIRING_CODE_LENGTH: usize = 6;
 
-use axum::routing::{get, post};
 use axum::extract::State;
+use axum::routing::{get, post};
 use axum::Json;
 use axum::Router;
 use std::collections::HashMap;
@@ -148,10 +148,7 @@ impl TelegramClient {
         let webhook_path = client.lock().await.webhook_path.clone();
 
         let app = Router::new()
-            .route(
-                &format!("/{}", webhook_path),
-                post(handle_telegram_webhook),
-            )
+            .route(&format!("/{}", webhook_path), post(handle_telegram_webhook))
             .route("/health", get(health_check))
             .with_state(client);
 
@@ -251,7 +248,9 @@ impl TelegramClient {
         }
 
         let content_trimmed = msg.content.trim().to_uppercase();
-        if content_trimmed.len() == PAIRING_CODE_LENGTH && content_trimmed.chars().all(|c| c.is_ascii_alphanumeric()) {
+        if content_trimmed.len() == PAIRING_CODE_LENGTH
+            && content_trimmed.chars().all(|c| c.is_ascii_alphanumeric())
+        {
             if let Some(response) = self.handle_pairing_code(&content_trimmed, msg).await? {
                 return Ok(Some(response));
             }
@@ -364,7 +363,9 @@ impl TelegramClient {
             Ok(m) => m,
             Err(e) => {
                 error!("Failed to load pairing manager: {}", e);
-                return Ok(Some("Pairing system unavailable. Please try again later.".to_string()));
+                return Ok(Some(
+                    "Pairing system unavailable. Please try again later.".to_string(),
+                ));
             }
         };
 
@@ -379,10 +380,14 @@ impl TelegramClient {
                     "✅ Authorization successful!\n\nYou can now use {} in this chat.",
                     self.assistant_name
                 );
-                self.send_message(&chat_id.to_string(), &response).await.ok();
+                self.send_message(&chat_id.to_string(), &response)
+                    .await
+                    .ok();
                 return Ok(Some("✅ You have been authorized!".to_string()));
             } else {
-                return Ok(Some("This code is not for you. Please request your own pairing code.".to_string()));
+                return Ok(Some(
+                    "This code is not for you. Please request your own pairing code.".to_string(),
+                ));
             }
         }
 
@@ -390,7 +395,9 @@ impl TelegramClient {
             return Ok(None);
         }
 
-        Ok(Some("Invalid or expired pairing code. Please request a new one.".to_string()))
+        Ok(Some(
+            "Invalid or expired pairing code. Please request a new one.".to_string(),
+        ))
     }
 
     async fn is_allowed_group(&self, chat_jid: &str) -> Result<bool> {
@@ -541,11 +548,11 @@ mod tests {
     #[tokio::test]
     async fn test_webhook_requires_secret_when_configured() {
         std::env::set_var("TELEGRAM_WEBHOOK_SECRET", "test_secret_123");
-        
+
         // Test without secret - should fail
         let result = std::env::var("TELEGRAM_WEBHOOK_SECRET");
         assert!(result.is_ok());
-        
+
         std::env::remove_var("TELEGRAM_WEBHOOK_SECRET");
     }
 }

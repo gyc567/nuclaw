@@ -31,9 +31,14 @@ pub mod types;
 pub mod utils;
 pub mod whatsapp;
 pub mod workflow;
+pub mod workspace;
 
 // Re-exports for convenience
 pub use agent_runner::{agent_runner_mode, create_runner, AgentRunner, AgentRunnerMode};
+pub use autoresearch::{
+    AutoResearchRunner, EvalError, Evaluator, ExperimentConfig, ExperimentHistory,
+    ExperimentResult, Metric, Program, ProgramError, RunnerError,
+};
 pub use channels::{Channel, ChannelRegistry};
 pub use config::ensure_directories;
 pub use container_runner::{
@@ -42,6 +47,10 @@ pub use container_runner::{
 };
 pub use error::{NuClawError, Result};
 pub use onboard::{load_config, print_config_status, run_onboard, save_config};
+pub use orchestrator::{
+    Executor, ExecutorConfig, ExecutorEvent, ExecutorStats, Metrics, MetricsSnapshot, Priority,
+    Task, TaskId, TaskQueue, TaskResult, TaskSource, TaskStatus,
+};
 pub use providers::{ProviderConfig, ProviderRegistry, ProviderSpec, PROVIDERS};
 pub use skills::{Skill, SkillRegistry};
 pub use task_scheduler::TaskScheduler;
@@ -51,14 +60,6 @@ pub use telegram::{
     DMPolicy, GroupPolicy, ReplyMode, StreamMode, TelegramChat, TelegramClient, TelegramMessage,
     TelegramUpdate, TelegramUser, DEFAULT_TEXT_CHUNK_LIMIT,
 };
-pub use autoresearch::{
-    AutoResearchRunner, EvalError, Evaluator, ExperimentConfig, ExperimentHistory, ExperimentResult,
-    Metric, Program, ProgramError, RunnerError,
-};
-pub use workflow::{WorkflowConfig, WorkflowLoader, WorkflowLoaderError, HookRunner, HookType};
-pub use orchestrator::{
-    Executor, ExecutorConfig, ExecutorEvent, ExecutorStats,
-    Metrics, MetricsSnapshot,
-    TaskQueue,
-    Task, TaskId, TaskResult, TaskSource, TaskStatus, Priority,
+pub use workflow::{
+    HookRunner, HookType, WorkflowConfig, WorkflowLoader, WorkflowLoaderError, WorkflowWatcher,
 };
