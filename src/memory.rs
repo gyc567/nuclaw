@@ -745,6 +745,7 @@ pub struct TieredMemory {
     hot: Arc<HotMemory>,
     warm: Arc<WarmMemory>,
     cold: Arc<ColdMemory>,
+    #[allow(dead_code)]
     policy: MigrationPolicy,
 }
 
