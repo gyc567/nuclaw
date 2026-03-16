@@ -9,17 +9,17 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & Release
-    runs-on: macos-14  # Apple Silicon (M1/M2)
+  build-linux:
+    name: Build Linux ${{ matrix.name }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: aarch64-apple-darwin
-            name: macOS ARM64 (Apple Silicon)
-          - target: x86_64-apple-darwin
-            name: macOS x64 (Intel)
+          - target: x86_64-unknown-linux-gnu
+            name: x86_64
+          - target: aarch64-unknown-linux-gnu
+            name: arm64
 
     steps:
       - name: Checkout code
@@ -38,46 +38,55 @@ jobs:
 
       - name: Create tarball
         run: |
-          tar -czf nuclaw-${{ matrix.name }}.tar.gz -C target/${{ matrix.target }}/release nuclaw
-          echo "ARTIFACT_NAME=nuclaw-${{ matrix.name }}.tar.gz" >> $GITHUB_ENV
+          tar -czf nuclaw-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release nuclaw
 
-      - name: Upload artifact
-        uses: actions/upload-release-asset@v1
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: nuclaw-${{ matrix.target }}.tar.gz
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: nuclaw-${{ matrix.name }}.tar.gz
-          asset_name: nuclaw-${{ matrix.name }}.tar.gz
-          asset_content_type: application/gzip
 
-  create-release:
-    name: Create GitHub Release
-    needs: release
-    runs-on: ubuntu-latest
+  build-macos:
+    name: Build macOS ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            name: arm64
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            name: x86_64
+            runner: macos-latest
+
     steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Build release
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+          strip target/${{ matrix.target }}/release/nuclaw
+
+      - name: Create tarball
+        run: |
+          tar -czf nuclaw-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release nuclaw
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: nuclaw-${{ matrix.target }}.tar.gz
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: NuClaw v${{ github.ref_name }}
-          body: |
-            ## 安装方式
-
-            ### macOS 一键安装
-            ```bash
-            curl -sSL https://raw.githubusercontent.com/gyc567/nuclaw/main/install.sh | bash
-            ```
-
-            ### 手动安装
-            1. 下载对应的 tar.gz 文件
-            2. 解压到 ~/.nuclaw/
-            3. 配置环境变量并运行
-
-            ## 更新日志
-            请查看 [CHANGELOG](CHANGELOG.md)
-          draft: false
-          prerelease: false
