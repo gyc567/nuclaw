@@ -27,6 +27,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_full_configuration_loading() {
         // Setup
         config::ensure_directories().expect("Failed to create directories");
@@ -49,6 +50,7 @@ mod e2e_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_configuration_persistence() {
         // Create a test config file
         let config_path = config::data_dir().join("test_config.json");
@@ -74,6 +76,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_provider_registry_workflow() {
         // Setup
         std::env::remove_var("ANTHROPIC_API_KEY");
@@ -103,6 +106,7 @@ mod e2e_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_provider_config_loading() {
         // Setup environment
         std::env::remove_var("ANTHROPIC_API_KEY");
@@ -139,6 +143,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_skills_workflow() {
         let skills: &dyn SkillRegistry = &builtin_skills();
 
@@ -168,6 +173,7 @@ mod e2e_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_registration_workflow() {
         use nuclaw::skills::{BuiltinSkillRegistry, Skill};
 
@@ -193,6 +199,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_channel_registry_workflow() {
         let registry = ChannelRegistry::new();
 
@@ -235,6 +242,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_database_full_workflow() {
         config::ensure_directories().expect("Failed to create directories");
         let db = Database::new().expect("Failed to create database");
@@ -288,6 +296,7 @@ mod e2e_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_database_concurrent_operations() {
         config::ensure_directories().expect("Failed to create directories");
         let db = Database::new().expect("Failed to create database");
@@ -332,6 +341,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_task_scheduler_workflow() {
         config::ensure_directories().expect("Failed to create directories");
 
@@ -349,6 +359,7 @@ mod e2e_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_scheduled_task_creation() {
         let task = ScheduledTask {
             id: "test_task_1".to_string(),
@@ -375,6 +386,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_container_config_workflow() {
         config::ensure_directories().expect("Failed to create directories");
 
@@ -401,6 +413,7 @@ mod e2e_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_max_output_size_config() {
         // Test default
         let size = max_output_size();
@@ -415,6 +428,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_message_processing_workflow() {
         // Create a test message
         let message = NewMessage {
@@ -433,6 +447,7 @@ mod e2e_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_container_input_workflow() {
         let input = ContainerInput {
             prompt: "Test prompt".to_string(),
@@ -453,6 +468,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_telegram_message_chunking() {
         // Test short message (no chunking)
         let short = "Short message";
@@ -477,6 +493,7 @@ mod e2e_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_telegram_policy_parsing() {
         // DM Policy
         assert_eq!(DMPolicy::parse("pairing"), DMPolicy::Pairing);
@@ -495,6 +512,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_error_propagation_workflow() {
         use nuclaw::error::NuClawError;
 
@@ -520,6 +538,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_session_workflow() {
         let session = Session::new();
 
@@ -532,6 +551,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_agent_runner_mode_switching() {
         // Test default mode (container)
         std::env::remove_var("AGENT_RUNNER_MODE");
@@ -552,6 +572,7 @@ mod e2e_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_type_serialization_roundtrip() {
         use nuclaw::types::{ContainerInput, ContainerOutput, NewMessage};
 
@@ -599,6 +620,7 @@ mod performance_tests {
     use std::time::Instant;
 
     #[test]
+    #[serial_test::serial]
     fn test_json_serialization_performance() {
         let data = serde_json::json!({
             "messages": (0..100).map(|i| {
@@ -630,6 +652,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_path_operations_performance() {
         let iterations = 1000;
         let start = Instant::now();
@@ -651,6 +674,7 @@ mod performance_tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_env_file_format() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -689,6 +713,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_partial_config() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -731,6 +756,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_telegram_only() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -776,6 +802,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_config_status() {
         use nuclaw::onboard::{env_file_path, print_config_status, save_config, OnboardConfig};
 
@@ -802,6 +829,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_openrouter_config() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -835,6 +863,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_custom_endpoint_config() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -872,6 +901,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_empty_config() {
         use nuclaw::onboard::{load_config, save_config, OnboardConfig};
 
@@ -893,6 +923,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_nonexistent_path() {
         use nuclaw::onboard::load_config;
 
@@ -908,6 +939,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_config_persistence() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -945,6 +977,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_with_comments_in_env() {
         use nuclaw::onboard::{env_file_path, load_config};
 
@@ -981,6 +1014,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_provider_integration() {
         use nuclaw::onboard::{env_file_path, save_config, OnboardConfig};
         use nuclaw::providers::{provider_registry, ProviderConfig, PROVIDERS};
@@ -1031,6 +1065,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_directory_creation() {
         use nuclaw::onboard::{env_file_path, save_config, OnboardConfig};
 
@@ -1059,6 +1094,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_special_characters_in_token() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -1099,6 +1135,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_llm_only_anthropic() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -1150,6 +1187,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_llm_only_openai() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -1189,6 +1227,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_llm_only_openrouter() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -1228,6 +1267,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_telegram_only_test() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -1268,6 +1308,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_full_llm_plus_telegram() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -1321,6 +1362,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_env_file_sourceable() {
         use nuclaw::onboard::{env_file_path, save_config, OnboardConfig};
 
@@ -1356,6 +1398,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_env_file_multiline_structure() {
         use nuclaw::onboard::{env_file_path, save_config, OnboardConfig};
 
@@ -1407,6 +1450,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_provider_model_config() {
         use nuclaw::onboard::{env_file_path, save_config, OnboardConfig};
 
@@ -1438,6 +1482,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_onboard_env_file_no_duplicate_keys() {
         use nuclaw::onboard::{env_file_path, load_config, save_config, OnboardConfig};
 
@@ -1495,6 +1540,7 @@ ANTHROPIC_API_KEY=sk-comment-test
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_from_directory_minimal() {
         use nuclaw::skills::Skill;
         use std::path::PathBuf;
@@ -1525,6 +1571,7 @@ This is a test skill content."#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_from_directory_full_frontmatter() {
         use nuclaw::skills::Skill;
         use std::path::PathBuf;
@@ -1569,6 +1616,7 @@ This skill has all frontmatter fields."#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_from_directory_with_subdirs() {
         use nuclaw::skills::Skill;
         use std::path::PathBuf;
@@ -1621,6 +1669,7 @@ description: A skill with subdirectories
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_from_directory_missing_skill_md() {
         use nuclaw::skills::Skill;
         use std::path::PathBuf;
@@ -1636,6 +1685,7 @@ description: A skill with subdirectories
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_registry_with_external_skills() {
         use nuclaw::config::skills_dir;
         use nuclaw::skills::builtin_skills;
@@ -1671,6 +1721,7 @@ Loaded from external directory."#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_validation_errors() {
         use nuclaw::skills::Skill;
         use nuclaw::skills::SkillValidationError;
@@ -1694,6 +1745,7 @@ Loaded from external directory."#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_name_validation() {
         use nuclaw::skills::Skill;
         use nuclaw::skills::SkillValidationError;
@@ -1726,6 +1778,7 @@ Loaded from external directory."#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_compatibility_validation() {
         use nuclaw::skills::Skill;
         use nuclaw::skills::SkillValidationError;
@@ -1739,6 +1792,7 @@ Loaded from external directory."#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_builtin_skills_valid() {
         use nuclaw::skills::builtin_skills;
 
@@ -1755,6 +1809,7 @@ Loaded from external directory."#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_skill_registry_traits() {
         use nuclaw::skills::{builtin_skills, SkillRegistry};
 

@@ -85,6 +85,7 @@ notify = "6.1"
 
 [dev-dependencies]
 libc = "0.2.180"
+serial_test = "3.4.0"
 tempfile = "3.12"
 
 [profile.release]

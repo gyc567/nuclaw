@@ -3,16 +3,18 @@
 //! Provides WhatsApp connectivity via external WhatsApp MCP Server or HTTP API.
 
 use crate::config::{assistant_name, data_dir, store_dir};
-use crate::container_runner::{container_timeout, run_container};
+use crate::container_runner::container_timeout;
 use crate::db::Database;
 use crate::error::{NuClawError, Result};
-use crate::types::{ContainerInput, NewMessage, RegisteredGroup, RouterState};
+use crate::types::{NewMessage, RegisteredGroup, RouterState};
 use crate::utils::json::{load_json, save_json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info};
+
+use crate::router::EventRouter;
 
 /// Default WhatsApp poll interval: 2 seconds
 const DEFAULT_WHATSAPP_POLL_INTERVAL_MS: u64 = 2000;
@@ -31,11 +33,13 @@ pub struct WhatsAppClient {
     db: Database,
     /// Assistant name for trigger detection
     assistant_name: String,
+    /// Event router for message dispatching
+    router: Arc<EventRouter>,
 }
 
 impl WhatsAppClient {
     /// Create a new WhatsApp client
-    pub fn new(db: Database) -> Self {
+    pub fn new(db: Database, router: Arc<EventRouter>) -> Self {
         Self {
             connected: false,
             last_qr: None,
@@ -43,6 +47,7 @@ impl WhatsAppClient {
             router_state: load_router_state(),
             db,
             assistant_name: assistant_name(),
+            router,
         }
     }
 
@@ -194,17 +199,18 @@ impl WhatsAppClient {
                     message: format!("Group not found: {}", msg.chat_jid),
                 })?;
 
-        let session_id = format!("whatsapp_{}", msg.id);
-        let input = ContainerInput {
-            prompt: content,
-            session_id: Some(session_id.clone()),
+        let is_group = !msg.chat_jid.ends_with("@s.whatsapp.net");
+        let event = crate::types::AppEvent::ChatMessage {
+            platform: "whatsapp".to_string(),
+            chat_id: msg.chat_jid.clone(),
+            user_id: msg.sender.clone(),
+            message_id: msg.id.clone(),
+            message_text: content,
             group_folder,
-            chat_jid: msg.chat_jid.clone(),
-            is_main: msg.chat_jid.ends_with("@s.whatsapp.net"),
-            is_scheduled_task: false,
+            is_group,
         };
 
-        let result = timeout(container_timeout(), run_container(input)).await;
+        let result = tokio::time::timeout(container_timeout(), self.router.dispatch(event)).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -469,6 +475,9 @@ mod tests {
     #[test]
     fn test_extract_trigger_with_at() {
         setup_test_dirs();
+        let router = std::sync::Arc::new(crate::router::EventRouter::new(
+            std::sync::Arc::new(crate::runtime::DockerRuntime),
+        ));
         let client = WhatsAppClient {
             connected: false,
             last_qr: None,
@@ -476,6 +485,7 @@ mod tests {
             router_state: RouterState::default(),
             db: Database::new().unwrap(),
             assistant_name: "Andy".to_string(),
+            router,
         };
 
         let result = tokio::runtime::Runtime::new()
@@ -491,6 +501,9 @@ mod tests {
     #[test]
     fn test_extract_trigger_without_at() {
         setup_test_dirs();
+        let router = std::sync::Arc::new(crate::router::EventRouter::new(
+            std::sync::Arc::new(crate::runtime::DockerRuntime),
+        ));
         let client = WhatsAppClient {
             connected: false,
             last_qr: None,
@@ -498,6 +511,7 @@ mod tests {
             router_state: RouterState::default(),
             db: Database::new().unwrap(),
             assistant_name: "Andy".to_string(),
+            router,
         };
 
         let result = tokio::runtime::Runtime::new()

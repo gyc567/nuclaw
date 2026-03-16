@@ -194,8 +194,12 @@ async fn run_whatsapp_bot(db: db::Database) -> Result<()> {
         return Ok(());
     }
 
+    // Create Event Router
+    let runtime = std::sync::Arc::new(nuclaw::runtime::DockerRuntime);
+    let router = std::sync::Arc::new(nuclaw::router::EventRouter::new(runtime));
+
     // Create WhatsApp client
-    let mut client = whatsapp::WhatsAppClient::new(db);
+    let mut client = nuclaw::whatsapp::WhatsAppClient::new(db, router);
 
     // Connect to WhatsApp
     client.connect().await?;

@@ -274,17 +274,19 @@ impl TelegramClient {
                     message: format!("Group not found: {}", msg.chat_jid),
                 })?;
 
-        let session_id = format!("telegram_{}", msg.id);
-        let input = ContainerInput {
-            prompt: content,
-            session_id: Some(session_id.clone()),
+        let is_group = msg.chat_jid.contains(":group:");
+        let event = crate::types::AppEvent::ChatMessage {
+            platform: "telegram".to_string(),
+            chat_id: msg.chat_jid.clone(),
+            user_id: msg.sender.clone(),
+            message_id: msg.id.clone(),
+            message_text: content,
             group_folder,
-            chat_jid: msg.chat_jid.clone(),
-            is_main: true,
-            is_scheduled_task: false,
+            is_group,
         };
 
-        let result = timeout(container_timeout(), run_container(input)).await;
+        let router = crate::router::EventRouter::new(std::sync::Arc::new(crate::runtime::DockerRuntime));
+        let result = tokio::time::timeout(crate::container_runner::container_timeout(), router.dispatch(event)).await;
 
         match result {
             Ok(Ok(output)) => {

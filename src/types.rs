@@ -89,6 +89,22 @@ pub struct ContainerOutput {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AppEvent {
+    ChatMessage {
+        platform: String,
+        chat_id: String,
+        user_id: String,
+        message_id: String,
+        message_text: String,
+        group_folder: String,
+        is_group: bool,
+    },
+    ScheduledTask {
+        task_id: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RouterState {
     pub last_timestamp: String,
