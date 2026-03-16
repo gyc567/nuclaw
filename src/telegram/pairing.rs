@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use rand::Rng;
 
 use crate::config::nuclaw_home;
 use crate::error::{NuClawError, Result};
@@ -71,14 +73,14 @@ impl PairingManager {
     }
 
     fn generate_random_code() -> String {
-        use std::iter;
         const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-        iter::repeat_with(|| {
-            let idx = rand_u32() as usize % CHARSET.len();
-            CHARSET[idx] as char
-        })
-        .take(PAIRING_CODE_LENGTH)
-        .collect()
+        let mut rng = rand::thread_rng();
+        (0..PAIRING_CODE_LENGTH)
+            .map(|_| {
+                let idx = rng.gen_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect()
     }
 
     pub fn generate_code(&mut self, user_id: &str, chat_id: i64) -> Result<String> {
@@ -165,15 +167,6 @@ impl PairingManager {
             .pending_codes
             .retain(|_, v| now <= v.expires_at);
     }
-}
-
-fn rand_u32() -> u32 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    nanos.wrapping_mul(1103515245).wrapping_add(12345)
 }
 
 #[cfg(test)]

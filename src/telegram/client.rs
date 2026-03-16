@@ -1,27 +1,26 @@
 //! Telegram client implementation
 
 use crate::config::{assistant_name, data_dir};
-use crate::container_runner::{container_timeout, run_container};
 use crate::db::Database;
 use crate::error::{NuClawError, Result};
 use crate::telegram::pairing::PairingManager;
 use crate::telegram::policy::{DMPolicy, GroupPolicy};
 use crate::telegram::types::TelegramMessage;
 use crate::telegram::utils::{extract_chat_id_pure, DEFAULT_TEXT_CHUNK_LIMIT};
-use crate::types::{ContainerInput, NewMessage, RegisteredGroup, RouterState};
+use crate::types::{NewMessage, RegisteredGroup, RouterState};
 use crate::utils::json::{load_json, save_json};
 
 const PAIRING_CODE_LENGTH: usize = 6;
 
 use axum::extract::State;
 use axum::routing::{get, post};
-use axum::Json;
-use axum::Router;
+use axum::{Json, Router};
+use axum::http::StatusCode;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 use tracing::{debug, error, info};
 
 /// Telegram client state
@@ -39,30 +38,53 @@ pub struct TelegramClient {
 }
 
 async fn telegram_send_single_message(api_url: &str, chat_id: i64, text: &str) -> Result<()> {
+    telegram_send_with_retry(api_url, chat_id, text, 3).await
+}
+
+/// Send message with exponential backoff retry
+async fn telegram_send_with_retry(
+    api_url: &str,
+    chat_id: i64,
+    text: &str,
+    max_retries: u32,
+) -> Result<()> {
     let payload = serde_json::json!({
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML"
     });
 
-    let response = reqwest::Client::new()
-        .post(format!("{}/sendMessage", api_url))
-        .json(&payload)
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await
-        .map_err(|e| NuClawError::Telegram {
-            message: format!("Failed to send message: {}", e),
-        })?;
+    let mut last_error = None;
 
-    if !response.status().is_success() {
-        let error = response.text().await.unwrap_or_default();
-        return Err(NuClawError::Telegram {
-            message: format!("Failed to send message: {}", error),
-        });
+    for attempt in 0..max_retries {
+        let client = reqwest::Client::new();
+        let response = client
+            .post(format!("{}/sendMessage", api_url))
+            .json(&payload)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) if resp.status().is_success() => return Ok(()),
+            Ok(resp) => {
+                let error = resp.text().await.unwrap_or_default();
+                last_error = Some(format!("Failed to send message: {}", error));
+            }
+            Err(e) => {
+                last_error = Some(format!("Request failed: {}", e));
+            }
+        }
+
+        if attempt < max_retries - 1 {
+            let delay = Duration::from_millis(500 * (2_u64.pow(attempt)));
+            tokio::time::sleep(delay).await;
+        }
     }
 
-    Ok(())
+    Err(NuClawError::Telegram {
+        message: last_error.unwrap_or_else(|| "Unknown error".to_string()),
+    })
 }
 
 impl TelegramClient {
@@ -491,19 +513,19 @@ impl TelegramClient {
 async fn handle_telegram_webhook(
     State(client): State<Arc<Mutex<TelegramClient>>>,
     Json(update): Json<crate::telegram::types::TelegramUpdate>,
-) -> &'static str {
-    // Note: For production, consider using a custom extractor for headers
-    // or passing the secret through the state
-
+) -> (StatusCode, &'static str) {
     let mut client = client.lock().await;
-    if let Err(e) = client.handle_update(&update).await {
-        error!("Failed to handle telegram update: {}", e);
+    match client.handle_update(&update).await {
+        Ok(_) => (StatusCode::OK, "OK"),
+        Err(e) => {
+            error!("Failed to handle telegram update: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "ERROR")
+        }
     }
-    "OK"
 }
 
-async fn health_check() -> &'static str {
-    "OK"
+async fn health_check() -> (StatusCode, &'static str) {
+    (StatusCode::OK, "OK")
 }
 
 // Helper functions
@@ -556,5 +578,14 @@ mod tests {
         assert!(result.is_ok());
 
         std::env::remove_var("TELEGRAM_WEBHOOK_SECRET");
+    }
+
+    #[test]
+    fn test_telegram_send_with_retry_handles_invalid_url() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            telegram_send_with_retry("https://invalid.url.that.does.not.exist", 123, "test", 1).await
+        });
+        assert!(result.is_err());
     }
 }

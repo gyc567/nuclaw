@@ -153,6 +153,22 @@ async fn run_main_application(db: db::Database) -> Result<()> {
         }
     });
 
+    // Auto-start Telegram bot if TELEGRAM_BOT_TOKEN is configured
+    // This runs independently - failure won't affect scheduler
+    let telegram_db = db.clone();
+    let telegram_handle = tokio::spawn(async move {
+        if telegram::should_auto_start_telegram() {
+            info!("Auto-starting Telegram bot (TELEGRAM_BOT_TOKEN is set)...");
+            match run_telegram_bot_internal(telegram_db).await {
+                Ok(_) => info!("Telegram bot started successfully"),
+                Err(e) => warn!("Failed to start Telegram bot: {}. Continuing without Telegram...", e),
+            }
+        } else {
+            info!("TELEGRAM_BOT_TOKEN not set. Telegram bot will not auto-start.");
+            info!("Set TELEGRAM_BOT_TOKEN to enable Telegram bot, or run with --telegram flag.");
+        }
+    });
+
     info!("NuClaw is running. Press Ctrl+C to stop.");
 
     // Wait for shutdown signal
@@ -168,8 +184,31 @@ async fn run_main_application(db: db::Database) -> Result<()> {
     // Graceful shutdown
     let _ = shutdown_tx.send(()).await;
     scheduler_handle.abort();
+    telegram_handle.abort();
 
     info!("NuClaw shutdown complete.");
+    Ok(())
+}
+
+/// Internal function to start Telegram bot (used by auto-start)
+async fn run_telegram_bot_internal(db: db::Database) -> Result<()> {
+    // Check if Telegram bot token is configured
+    if std::env::var("TELEGRAM_BOT_TOKEN").is_err() {
+        return Err(NuClawError::Config {
+            message: "TELEGRAM_BOT_TOKEN not set".to_string(),
+        });
+    }
+
+    // Create Telegram client
+    let mut client = telegram::TelegramClient::new(db)?;
+
+    // Connect to Telegram
+    client.connect().await?;
+    info!("Connected to Telegram");
+
+    // Start webhook server
+    client.start_webhook_server().await?;
+
     Ok(())
 }
 
@@ -235,17 +274,8 @@ async fn run_telegram_bot(db: db::Database) -> Result<()> {
         return Ok(());
     }
 
-    // Create Telegram client
-    let mut client = telegram::TelegramClient::new(db)?;
-
-    // Connect to Telegram
-    client.connect().await?;
-    info!("Connected to Telegram");
-
-    // Start webhook server
-    client.start_webhook_server().await?;
-
-    Ok(())
+    // Use internal function
+    run_telegram_bot_internal(db).await
 }
 
 fn pid_file_path() -> std::path::PathBuf {
@@ -362,6 +392,12 @@ fn run_restart_command() -> Result<()> {
 }
 
 fn run_status_command() -> Result<()> {
+    let telegram_status = if telegram::should_auto_start_telegram() {
+        "Auto-enabled (TELEGRAM_BOT_TOKEN set)"
+    } else {
+        "Disabled (run with --telegram to enable)"
+    };
+    
     if let Some(pid) = read_pid() {
         if is_process_running(pid) {
             println!("╔══════════════════════════════════════════════════════════════╗");
@@ -372,13 +408,25 @@ fn run_status_command() -> Result<()> {
                 "║  PID:       {}                                             ║",
                 pid
             );
+            println!(
+                "║  Telegram:  {}                                             ║",
+                telegram_status
+            );
             println!("╚══════════════════════════════════════════════════════════════╝");
         } else {
             println!("NuClaw is not running (stale PID file: {})", pid);
             remove_pid_file().ok();
         }
     } else {
-        println!("NuClaw is not running");
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║                        NuClaw Status                        ║");
+        println!("╠══════════════════════════════════════════════════════════════╣");
+        println!("║  Status:    Not running                                     ║");
+        println!(
+            "║  Telegram:  {}                                             ║",
+            telegram_status
+        );
+        println!("╚══════════════════════════════════════════════════════════════╝");
         println!("Run 'nuclaw --start' to start the service");
     }
 

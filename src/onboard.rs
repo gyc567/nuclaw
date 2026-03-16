@@ -374,33 +374,51 @@ pub fn print_config_status() -> Result<()> {
 }
 
 #[cfg(test)]
+#[serial]
 mod tests {
     use super::*;
     use std::env;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
-    fn setup_test_env() -> String {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let test_dir = format!("/tmp/nuclaw_test_{}_{}", counter, std::process::id());
-        env::remove_var("NUCLAW_HOME");
-        env::set_var("NUCLAW_HOME", &test_dir);
-        let _ = fs::create_dir_all(&test_dir);
-        test_dir
+    struct TestGuard {
+        test_dir: String,
     }
 
-    fn cleanup_test_dir(test_dir: &str) {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        let _ = fs::remove_dir_all(test_dir);
+    impl TestGuard {
+        fn new() -> Self {
+            let counter = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+            let test_dir = format!(
+                "/tmp/nuclaw_test_{}_{}_{}",
+                counter,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            env::remove_var("NUCLAW_HOME");
+            env::set_var("NUCLAW_HOME", &test_dir);
+            let _ = fs::create_dir_all(&test_dir);
+            Self { test_dir }
+        }
+    }
+
+    impl Drop for TestGuard {
+        fn drop(&mut self) {
+            env::remove_var("NUCLAW_HOME");
+            let _ = fs::remove_dir_all(&self.test_dir);
+        }
+    }
+
+    fn setup_test_env() -> TestGuard {
+        TestGuard::new()
     }
 
     #[test]
     fn test_openai_provider_config() {
-        let test_dir = setup_test_env();
+        let _guard = setup_test_env();
 
         let content =
             "OPENAI_API_KEY=sk-openai-test\nOPENAI_BASE_URL=https://custom.openai.com/v1\n";
@@ -414,8 +432,6 @@ mod tests {
             config.base_url,
             Some("https://custom.openai.com/v1".to_string())
         );
-
-        cleanup_test_dir(&test_dir);
     }
 
     #[test]
@@ -448,8 +464,7 @@ mod tests {
 
     #[test]
     fn test_save_and_load_config() {
-        let test_dir = setup_test_env();
-        let _ = fs::create_dir_all(&test_dir);
+        let guard = setup_test_env();
 
         let config = OnboardConfig {
             provider: Some("anthropic".to_string()),
@@ -465,35 +480,11 @@ mod tests {
         assert_eq!(loaded.api_key, config.api_key);
         assert_eq!(loaded.base_url, config.base_url);
         assert_eq!(loaded.telegram_token, config.telegram_token);
-
-        cleanup_test_dir(&test_dir);
-    }
-
-    #[test]
-    fn test_custom_provider_config() {
-        let test_dir = setup_test_env();
-        let _ = fs::create_dir_all(&test_dir);
-
-        let content =
-            "CUSTOM_API_KEY=sk-custom-test\nCUSTOM_BASE_URL=https://custom.endpoint.com/v1\n";
-        fs::write(env_file_path(), content).unwrap();
-
-        let config = load_config().unwrap();
-
-        assert_eq!(config.provider, Some("custom".to_string()));
-        assert_eq!(config.api_key, Some("sk-custom-test".to_string()));
-        assert_eq!(
-            config.base_url,
-            Some("https://custom.endpoint.com/v1".to_string())
-        );
-
-        cleanup_test_dir(&test_dir);
     }
 
     #[test]
     fn test_load_config_with_comments() {
-        let test_dir = setup_test_env();
-        let _ = fs::create_dir_all(&test_dir);
+        let _guard = setup_test_env();
 
         let content = r#"
 # NuClaw Configuration
@@ -518,13 +509,30 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
             Some("https://api.anthropic.com".to_string())
         );
         assert_eq!(config.telegram_token, Some("123456:ABC-DEF".to_string()));
+    }
 
-        cleanup_test_dir(&test_dir);
+    #[test]
+    fn test_custom_provider_config() {
+        let _guard = setup_test_env();
+
+        let content =
+            "CUSTOM_API_KEY=sk-custom-test\nCUSTOM_BASE_URL=https://custom.endpoint.com/v1\n";
+        fs::write(env_file_path(), content).unwrap();
+
+        let config = load_config().unwrap();
+
+        assert_eq!(config.provider, Some("custom".to_string()));
+        assert_eq!(config.api_key, Some("sk-custom-test".to_string()));
+        assert_eq!(
+            config.base_url,
+            Some("https://custom.endpoint.com/v1".to_string())
+        );
     }
 
     #[test]
     fn test_save_config_creates_directory() {
-        let test_dir = setup_test_env();
+        let guard = setup_test_env();
+        let test_dir = guard.test_dir.clone();
         let _ = fs::remove_dir_all(&test_dir);
 
         let config = OnboardConfig {
@@ -537,14 +545,11 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
         save_config(&config).unwrap();
 
         assert!(env_file_path().exists());
-
-        cleanup_test_dir(&test_dir);
     }
 
     #[test]
     fn test_load_config_partial() {
-        let test_dir = setup_test_env();
-        let _ = fs::create_dir_all(&test_dir);
+        let _guard = setup_test_env();
 
         let content = "ANTHROPIC_API_KEY=sk-test-only\n";
         fs::write(env_file_path(), content).unwrap();
@@ -555,13 +560,12 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
         assert_eq!(config.api_key, Some("sk-test-only".to_string()));
         assert!(config.base_url.is_none());
         assert!(config.telegram_token.is_none());
-
-        cleanup_test_dir(&test_dir);
     }
 
     #[test]
     fn test_save_config_overwrites() {
-        let test_dir = setup_test_env();
+        let guard = setup_test_env();
+        let test_dir = guard.test_dir.clone();
         let _ = fs::remove_dir_all(&test_dir);
 
         let config1 = OnboardConfig {
@@ -585,7 +589,5 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
         assert_eq!(loaded.provider, Some("openai".to_string()));
         assert_eq!(loaded.api_key, Some("key2".to_string()));
         assert_eq!(loaded.telegram_token, Some("tele-token".to_string()));
-
-        cleanup_test_dir(&test_dir);
     }
 }
