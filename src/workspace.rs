@@ -6,6 +6,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::error::{NuClawError, Result};
@@ -93,9 +94,13 @@ impl Workspace {
 
     pub fn metadata(&self) -> WorkspaceMetadata {
         let file_count = if self.path.exists() {
-            std::fs::read_dir(&self.path)
-                .map(|entries| entries.count())
-                .unwrap_or(0)
+            match std::fs::read_dir(&self.path) {
+                Ok(entries) => entries.count(),
+                Err(e) => {
+                    warn!("Failed to read directory {}: {}", self.path.display(), e);
+                    0
+                }
+            }
         } else {
             0
         };

@@ -16,8 +16,6 @@ use crate::error::NuClawError;
 type NotifyResult = std::result::Result<Event, NotifyError>;
 type NotifyReceiver = Receiver<NotifyResult>;
 
-pub type WatchCallback = Arc<dyn Fn(WatchEvent) + Send + Sync>;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WatchEvent {
     Modified(PathBuf),
@@ -25,14 +23,24 @@ pub enum WatchEvent {
     Removed(PathBuf),
 }
 
-#[derive(Clone)]
 pub struct WorkflowWatcher {
     path: PathBuf,
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
     receiver: Arc<Mutex<Option<NotifyReceiver>>>,
-    callback: Option<WatchCallback>,
     running: bool,
     debounce: Duration,
+}
+
+impl Clone for WorkflowWatcher {
+    fn clone(&self) -> Self {
+        WorkflowWatcher {
+            path: self.path.clone(),
+            watcher: Arc::clone(&self.watcher),
+            receiver: Arc::clone(&self.receiver),
+            running: self.running,
+            debounce: self.debounce,
+        }
+    }
 }
 
 impl std::fmt::Debug for WorkflowWatcher {
@@ -51,15 +59,9 @@ impl WorkflowWatcher {
             path: path.into(),
             watcher: Arc::new(Mutex::new(None)),
             receiver: Arc::new(Mutex::new(None)),
-            callback: None,
             running: false,
             debounce: Duration::from_millis(300),
         }
-    }
-
-    pub fn with_callback(mut self, callback: WatchCallback) -> Self {
-        self.callback = Some(callback);
-        self
     }
 
     pub fn start(&mut self) -> Result<(), NuClawError> {
@@ -86,8 +88,15 @@ impl WorkflowWatcher {
                 message: format!("Failed to watch path: {}", e),
             })?;
 
-        *self.watcher.lock().unwrap() = Some(watcher);
-        *self.receiver.lock().unwrap() = Some(rx);
+        let mut watcher_guard = self.watcher.lock().map_err(|e| NuClawError::FileSystem {
+            message: format!("Failed to lock watcher: {}", e),
+        })?;
+        *watcher_guard = Some(watcher);
+
+        let mut receiver_guard = self.receiver.lock().map_err(|e| NuClawError::FileSystem {
+            message: format!("Failed to lock receiver: {}", e),
+        })?;
+        *receiver_guard = Some(rx);
         self.running = true;
         Ok(())
     }
@@ -161,8 +170,6 @@ impl Default for WorkflowWatcher {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
 
     #[test]
     fn test_watcher_new_creates_instance() {
@@ -180,18 +187,6 @@ mod tests {
     fn test_watcher_default_path() {
         let watcher = WorkflowWatcher::default();
         assert_eq!(watcher.watch_path(), Path::new("WORKFLOW.md"));
-    }
-
-    #[test]
-    fn test_watcher_with_callback() {
-        let called = Arc::new(AtomicBool::new(false));
-        let called_clone = called.clone();
-
-        let watcher = WorkflowWatcher::new("test.md").with_callback(Arc::new(move |_event| {
-            called_clone.store(true, Ordering::SeqCst);
-        }));
-
-        assert!(watcher.callback.is_some());
     }
 
     #[test]
@@ -260,18 +255,6 @@ mod tests {
         let watcher = WorkflowWatcher::new("workflow.md");
         let path = watcher.watch_path();
         assert_eq!(path.to_string_lossy(), "workflow.md");
-    }
-
-    #[test]
-    fn test_watcher_multiple_callbacks_same_type() {
-        let counter = Arc::new(AtomicBool::new(false));
-        let counter_clone = counter.clone();
-
-        let _watcher = WorkflowWatcher::new("test.md").with_callback(Arc::new(move |_event| {
-            counter_clone.store(true, Ordering::SeqCst);
-        }));
-
-        let _watcher2 = WorkflowWatcher::new("test.md").with_callback(Arc::new(|_event| {}));
     }
 
     #[test]
