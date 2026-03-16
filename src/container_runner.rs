@@ -29,8 +29,8 @@ const DEFAULT_TIMEOUT_MS: u64 = 300_000;
 /// Default max output size: 10MB
 const DEFAULT_MAX_OUTPUT: usize = 10 * 1024 * 1024;
 /// Sentinel markers for output parsing
-const OUTPUT_START_MARKER: &str = "--NANOCLAW_OUTPUT_START--";
-const OUTPUT_END_MARKER: &str = "--NANOCLAW_OUTPUT_END--";
+const OUTPUT_START_MARKER: &str = "--NUCLAW_OUTPUT_START--";
+const OUTPUT_END_MARKER: &str = "--NUCLAW_OUTPUT_END--";
 
 /// Get container timeout from environment or default
 pub fn container_timeout() -> Duration {
@@ -418,7 +418,7 @@ mod tests {
 
     #[test]
     fn test_parse_marked_output() {
-        let output = "Some prefix\n--NANOCLAW_OUTPUT_START--\n{\"status\": \"success\", \"result\": \"test\"}\n--NANOCLAW_OUTPUT_END--\nSome suffix";
+        let output = "Some prefix\n--NUCLAW_OUTPUT_START--\n{\"status\": \"success\", \"result\": \"test\"}\n--NUCLAW_OUTPUT_END--\nSome suffix";
         let extracted = extract_marked_output(output);
         assert!(extracted.is_some());
         assert_eq!(
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn test_extract_marked_output_only_start_marker() {
-        let output = "--NANOCLAW_OUTPUT_START--\nsome content";
+        let output = "--NUCLAW_OUTPUT_START--\nsome content";
         let extracted = extract_marked_output(output);
         assert!(extracted.is_none());
     }
@@ -444,14 +444,14 @@ mod tests {
     #[test]
     fn test_extract_marked_output_reversed_markers() {
         // End marker before start marker should not match
-        let output = "--NANOCLAW_OUTPUT_END--\ncontent\n--NANOCLAW_OUTPUT_START--";
+        let output = "--NUCLAW_OUTPUT_END--\ncontent\n--NUCLAW_OUTPUT_START--";
         let extracted = extract_marked_output(output);
         assert!(extracted.is_none());
     }
 
     #[test]
     fn test_extract_marked_output_empty_content() {
-        let output = "--NANOCLAW_OUTPUT_START----NANOCLAW_OUTPUT_END--";
+        let output = "--NUCLAW_OUTPUT_START----NUCLAW_OUTPUT_END--";
         let extracted = extract_marked_output(output);
         assert!(extracted.is_some());
         assert_eq!(extracted.unwrap(), "");
@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_parse_container_output_marked() {
-        let output = "prefix\n--NANOCLAW_OUTPUT_START--\n{\"status\": \"success\", \"result\": \"marked\"}\n--NANOCLAW_OUTPUT_END--\nsuffix";
+        let output = "prefix\n--NUCLAW_OUTPUT_START--\n{\"status\": \"success\", \"result\": \"marked\"}\n--NUCLAW_OUTPUT_END--\nsuffix";
         let result = parse_container_output(output, true, 100);
         assert!(result.is_ok());
         let parsed = result.unwrap();
