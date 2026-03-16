@@ -1,5 +1,5 @@
 //!
-//! A Rust implementation of NanoClaw project structure.
+//! A Rust implementation of NuClaw project structure.
 //! Features:
 //! - WhatsApp integration via MCP
 //! - Telegram integration via Bot API

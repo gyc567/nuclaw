@@ -1,5 +1,5 @@
 //!
-//! A Rust implementation of NanoClaw project structure.
+//! A Rust implementation of NuClaw project structure.
 //! Features:
 //! - WhatsApp integration via MCP
 //! - Telegram integration via Bot API
@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
     logging::init();
 
     info!("Starting NuClaw v1.0.0");
-    info!("This is a Rust port of NanoClaw");
+    info!("This is a Rust port of NuClaw");
 
     // Ensure directories exist
     config::ensure_directories().map_err(|e| NuClawError::FileSystem {
