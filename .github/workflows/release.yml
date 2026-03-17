@@ -36,8 +36,9 @@ jobs:
       - name: Configure cross compilation
         if: matrix.cross == true
         run: |
-          echo "[target.aarch64-unknown-linux-gnu]" >> ~/.cargo/config.toml
-          echo "linker = \"aarch64-linux-gnu-gcc\"" >> ~/.cargo/config.toml
+          mkdir -p ~/.cargo
+          echo '[target.aarch64-unknown-linux-gnu]' > ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
