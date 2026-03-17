@@ -27,6 +27,17 @@ for arg in "$@"; do
         --skip-tests) SKIP_TESTS=true ;;
         --force-build) FORCE_BUILD=true ;;
         -y|--yes|--quiet) QUIET_MODE=true ;;
+        -h|--help)
+            echo "用法: curl -sSL https://raw.githubusercontent.com/gyc567/nuclaw/main/deploy.sh | bash"
+            echo "   或: ./deploy.sh [选项]"
+            echo ""
+            echo "选项:"
+            echo "  --skip-tests    跳过测试"
+            echo "  --force-build   强制从源码构建"
+            echo "  -y, --yes       自动确认"
+            echo "  -h, --help      显示帮助"
+            exit 0
+            ;;
     esac
 done
 

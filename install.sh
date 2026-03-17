@@ -18,6 +18,14 @@ NC='\033[0m'
 for arg in "$@"; do
     case $arg in
         -y|--yes|--quiet) QUIET_MODE=true ;;
+        -h|--help)
+            echo "用法: curl -sSL https://raw.githubusercontent.com/gyc567/nuclaw/main/install.sh | bash"
+            echo ""
+            echo "选项:"
+            echo "  -y, --yes, --quiet  自动确认所有提示"
+            echo "  -h, --help         显示此帮助"
+            exit 0
+            ;;
     esac
 done
 
