@@ -1,6 +1,7 @@
 use crate::config::{anthropic_api_key, anthropic_base_url, claude_model};
 use crate::error::{NuClawError, Result};
 use crate::types::{ContainerInput, ContainerOutput};
+use crate::workspace_manager::WorkspaceManager;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -181,16 +182,57 @@ pub fn create_runner() -> Result<Box<dyn AgentRunner>> {
             let runner = ApiRunner::new()?;
             Ok(Box::new(runner))
         }
-        AgentRunnerMode::Container => Ok(Box::new(ContainerRunnerAdapter)),
+        AgentRunnerMode::Container => Ok(Box::new(ContainerRunnerAdapter::new())),
     }
 }
 
-pub struct ContainerRunnerAdapter;
+pub struct ContainerRunnerAdapter {
+    workspace_manager: WorkspaceManager,
+}
+
+impl ContainerRunnerAdapter {
+    pub fn new() -> Self {
+        Self {
+            workspace_manager: WorkspaceManager::new(),
+        }
+    }
+}
+
+impl Default for ContainerRunnerAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl AgentRunner for ContainerRunnerAdapter {
-    async fn run(&self, input: ContainerInput) -> Result<ContainerOutput> {
-        crate::container_runner::run_container(input).await
+    async fn run(&self, mut input: ContainerInput) -> Result<ContainerOutput> {
+        // Resolve workspace for this session
+        let workspace_path = self
+            .workspace_manager
+            .get_workspace_path(input.session_id.as_deref(), &input.group_folder)
+            .await?;
+
+        // Update input with workspace path info
+        input.session_workspace_id = Some(workspace_path.to_string_lossy().to_string());
+
+        // Clone session_id before moving input
+        let session_id_clone = input.session_id.clone();
+
+        // Activate workspace if session exists
+        if let Some(ref session_id) = input.session_id {
+            let _ = self.workspace_manager.activate_workspace(session_id).await;
+        }
+
+        // Run container with workspace (clone input to avoid move)
+        let result = crate::container_runner::run_container(input.clone()).await;
+
+        // Deactivate workspace after execution
+        if let Some(ref session_id) = session_id_clone {
+            let _ = self.workspace_manager.deactivate_workspace(session_id).await;
+        }
+
+        result
     }
 }
 
@@ -250,6 +292,7 @@ mod tests {
             chat_jid: "test@chat".to_string(),
             is_main: true,
             is_scheduled_task: false,
+            session_workspace_id: None,
         };
         let prompt = build_system_prompt(&input);
         assert!(prompt.contains("main context"));
@@ -265,6 +308,7 @@ mod tests {
             chat_jid: "test@chat".to_string(),
             is_main: false,
             is_scheduled_task: true,
+            session_workspace_id: None,
         };
         let prompt = build_system_prompt(&input);
         assert!(prompt.contains("scheduled task"));
@@ -280,6 +324,7 @@ mod tests {
             chat_jid: "test@chat".to_string(),
             is_main: false,
             is_scheduled_task: false,
+            session_workspace_id: Some("ws_456".to_string()),
         };
         let prompt = build_system_prompt(&input);
         assert!(prompt.contains("isolated context"));

@@ -35,6 +35,7 @@ impl EventRouter {
                     chat_jid: chat_id,
                     is_main: !is_group,
                     is_scheduled_task: false,
+                    session_workspace_id: None,
                 })
             }
             AppEvent::ScheduledTask { task_id } => {
@@ -45,6 +46,7 @@ impl EventRouter {
                     chat_jid: "system".to_string(),
                     is_main: true,
                     is_scheduled_task: true,
+                    session_workspace_id: None,
                 })
             }
         }
@@ -76,6 +78,7 @@ mod tests {
             chat_jid: "test_jid".to_string(),
             is_main: true,
             is_scheduled_task: false,
+            session_workspace_id: None,
         };
 
         let result = router.handle_event(input.clone()).await.unwrap();

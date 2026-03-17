@@ -35,6 +35,7 @@ pub mod utils;
 pub mod whatsapp;
 pub mod workflow;
 pub mod workspace;
+pub mod workspace_manager;
 
 // Re-exports for convenience
 pub use agent_runner::{agent_runner_mode, create_runner, AgentRunner, AgentRunnerMode};
@@ -66,3 +67,4 @@ pub use telegram::{
 pub use workflow::{
     HookRunner, HookType, WorkflowConfig, WorkflowLoader, WorkflowLoaderError, WorkflowWatcher,
 };
+pub use workspace_manager::{ResolvedWorkspace, WorkspaceManager, WorkspaceType};

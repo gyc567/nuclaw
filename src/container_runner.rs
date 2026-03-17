@@ -637,6 +637,7 @@ mod tests {
             chat_jid: "test@chat".to_string(),
             is_main: true,
             is_scheduled_task: false,
+            session_workspace_id: Some("test_workspace".to_string()),
         };
 
         let result = write_ipc_files("test_ipc_group", &input);

@@ -170,6 +170,7 @@ impl TaskScheduler {
             chat_jid: task.chat_jid.clone(),
             is_main: false,
             is_scheduled_task: true,
+            session_workspace_id: None,
         };
 
         // Execute container with timeout

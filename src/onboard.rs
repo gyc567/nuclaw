@@ -7,6 +7,7 @@
 use crate::config::nuclaw_home;
 use crate::error::{NuClawError, Result};
 use crate::providers::PROVIDERS;
+use serial_test::serial;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;

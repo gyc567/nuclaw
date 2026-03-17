@@ -79,6 +79,8 @@ pub struct ContainerInput {
     pub chat_jid: String,
     pub is_main: bool,
     pub is_scheduled_task: bool,
+    /// Session workspace ID (set when using per-session workspace)
+    pub session_workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,9 +165,11 @@ mod tests {
             chat_jid: "chat_1".to_string(),
             is_main: true,
             is_scheduled_task: false,
+            session_workspace_id: Some("ws_456".to_string()),
         };
         assert!(input.session_id.is_some());
         assert!(input.is_main);
+        assert!(input.session_workspace_id.is_some());
     }
 
     #[test]

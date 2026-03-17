@@ -39,6 +39,9 @@ pub enum NuClawError {
 
     #[error("Security error: {message}")]
     Security { message: String },
+
+    #[error("Not found: {message}")]
+    NotFound { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, NuClawError>;
@@ -139,6 +142,9 @@ mod tests {
             message: "test".to_string(),
         };
         let _ = NuClawError::Security {
+            message: "test".to_string(),
+        };
+        let _ = NuClawError::NotFound {
             message: "test".to_string(),
         };
     }
