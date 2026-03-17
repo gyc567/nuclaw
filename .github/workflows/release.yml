@@ -37,8 +37,8 @@ jobs:
         if: matrix.cross == true
         run: |
           mkdir -p ~/.cargo
-          echo '[target.aarch64-unknown-linux-gnu]' > ~/.cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+          printf '%s\n' '[target.aarch64-unknown-linux-gnu]' > ~/.cargo/config.toml
+          printf '%s\n' 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -47,7 +47,16 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build release
+        if: matrix.cross == false
         run: |
+          cargo build --release --target ${{ matrix.target }}
+          strip target/${{ matrix.target }}/release/nuclaw
+
+      - name: Build release (cross)
+        if: matrix.cross == true
+        run: |
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
           cargo build --release --target ${{ matrix.target }}
           strip target/${{ matrix.target }}/release/nuclaw
 
