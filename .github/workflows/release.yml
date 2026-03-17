@@ -18,12 +18,26 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             name: x86_64
+            cross: false
           - target: aarch64-unknown-linux-gnu
             name: arm64
+            cross: true
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install cross compile tools
+        if: matrix.cross == true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Configure cross compilation
+        if: matrix.cross == true
+        run: |
+          echo "[target.aarch64-unknown-linux-gnu]" >> ~/.cargo/config.toml
+          echo "linker = \"aarch64-linux-gnu-gcc\"" >> ~/.cargo/config.toml
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
