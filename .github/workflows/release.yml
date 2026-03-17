@@ -18,22 +18,10 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             name: x86_64
-            cross: false
-          - target: aarch64-unknown-linux-gnu
-            name: arm64
-            cross: true
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install cross compile tools
-        if: matrix.cross == true
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          sudo ln -sf /usr/aarch64-linux-gnu/include/asm /usr/include/asm
-          sudo ln -sf /usr/aarch64-linux-gnu/include/linux /usr/include/linux
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -41,18 +29,10 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - name: Build release (native)
-        if: matrix.cross == false
+      - name: Build release
         run: |
           cargo build --release --target ${{ matrix.target }}
           strip target/${{ matrix.target }}/release/nuclaw
-
-      - name: Build release (cross)
-        if: matrix.cross == true
-        run: |
-          rustup target add aarch64-unknown-linux-gnu
-          cargo build --release --target aarch64-unknown-linux-gnu
-          strip target/aarch64-unknown-linux-gnu/release/nuclaw
 
       - name: Create tarball
         run: |
