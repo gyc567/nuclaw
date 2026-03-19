@@ -5,17 +5,30 @@ use crate::workspace_manager::WorkspaceManager;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use regex::Regex;
+
+// Rig-core imports for LLM integration
+use rig::client::CompletionClient;
+use rig::completion::Prompt;
+use rig::providers::anthropic;
+
+// Tool integration
+use crate::skill_to_rig::all_skills_to_tools;
+use crate::tool_registry::{ToolRegistry, InMemoryToolRegistry};
+use crate::skills::{builtin_skills, SkillRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentRunnerMode {
     #[default]
     Container,
     Api,
+    Rig,
 }
 
 pub fn agent_runner_mode() -> AgentRunnerMode {
     match std::env::var("AGENT_RUNNER_MODE").as_deref() {
         Ok("api") => AgentRunnerMode::Api,
+        Ok("rig") => AgentRunnerMode::Rig,
         _ => AgentRunnerMode::Container,
     }
 }
@@ -49,6 +62,7 @@ struct AnthropicResponse {
 #[allow(dead_code)]
 enum ContentBlock {
     Text { text: String },
+    Thinking { thinking: String, text: Option<String>, #[serde(rename = "type")] block_type: Option<String> },
     Error { error: ApiError },
 }
 
@@ -58,6 +72,60 @@ struct ApiError {
     #[serde(rename = "type")]
     error_type: String,
     message: String,
+}
+
+/// Extract URLs from text
+fn extract_urls(text: &str) -> Vec<String> {
+    let url_regex = Regex::new(r"https?://[^\s\)]+").unwrap();
+    url_regex
+        .find_iter(text)
+        .map(|m| m.as_str().to_string())
+        .collect()
+}
+
+/// Fetch URL content
+async fn fetch_url_content(url: &str) -> Option<String> {
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .ok()?;
+    
+    match client.get(url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            let text = resp.text().await.ok()?;
+            // Truncate to first 10KB to avoid too much context
+            let truncated = if text.len() > 10240 {
+                format!("{}...\n\n[Content truncated - total {} bytes]", &text[..10240], text.len())
+            } else {
+                text
+            };
+            Some(truncated)
+        }
+        _ => None,
+    }
+}
+
+/// Pre-process prompt to fetch URL content
+async fn preprocess_prompt(prompt: &str) -> String {
+    let urls = extract_urls(prompt);
+    
+    if urls.is_empty() {
+        return prompt.to_string();
+    }
+    
+    let mut processed = prompt.to_string();
+    
+    for url in urls.iter().take(3) {
+        // Limit to first 3 URLs
+        if let Some(content) = fetch_url_content(url).await {
+            processed.push_str(&format!(
+                "\n\n[Content fetched from {}]\n{}\n[/Content from {}]",
+                url, content, url
+            ));
+        }
+    }
+    
+    processed
 }
 
 pub struct ApiRunner {
@@ -93,9 +161,11 @@ impl AgentRunner for ApiRunner {
     async fn run(&self, input: ContainerInput) -> Result<ContainerOutput> {
         let system = build_system_prompt(&input);
 
+        let processed_content = preprocess_prompt(&input.prompt).await;
+
         let messages = vec![AnthropicMessage {
             role: "user".to_string(),
-            content: input.prompt.clone(),
+            content: processed_content,
         }];
 
         let request = AnthropicRequest {
@@ -134,14 +204,16 @@ impl AgentRunner for ApiRunner {
                 message: format!("Failed to parse response: {}", e),
             })?;
 
+        tracing::debug!("API response content: {:?}", anthropic_response.content);
+
         let content = anthropic_response
             .content
             .into_iter()
             .filter_map(|block| {
-                if let ContentBlock::Text { text } = block {
-                    Some(text)
-                } else {
-                    None
+                match block {
+                    ContentBlock::Text { text } => Some(text),
+                    ContentBlock::Thinking { text, .. } => text,
+                    ContentBlock::Error { .. } => None,
                 }
             })
             .collect::<Vec<_>>()
@@ -176,10 +248,88 @@ fn build_system_prompt(input: &ContainerInput) -> String {
     prompt
 }
 
+pub struct RigRunner {
+    client: anthropic::Client,
+    model: String,
+    tool_registry: InMemoryToolRegistry,
+}
+
+impl RigRunner {
+    pub fn new() -> Result<Self> {
+        let api_key = anthropic_api_key().ok_or_else(|| NuClawError::Config {
+            message: "ANTHROPIC_API_KEY is required for Rig mode".to_string(),
+        })?;
+
+        let model = claude_model().unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
+
+        let base_url = anthropic_base_url();
+
+        let client = if let Some(url) = base_url {
+            anthropic::Client::builder()
+                .base_url(url)
+                .api_key(&api_key)
+                .build()
+                .map_err(|e| NuClawError::Config {
+                    message: format!("Failed to create Rig client: {}", e),
+                })?
+        } else {
+            anthropic::Client::new(&api_key)
+                .map_err(|e| NuClawError::Config {
+                    message: format!("Failed to create Rig client: {}", e),
+                })?
+        };
+
+        let mut tool_registry = InMemoryToolRegistry::new();
+        let registry: &dyn SkillRegistry = &builtin_skills();
+        let skills = registry.list();
+        let tools = all_skills_to_tools(skills);
+        for tool in tools {
+            let name = tool.definition().name.clone();
+            if let Err(e) = tool_registry.register(tool) {
+                tracing::warn!("Failed to register tool {}: {}", name, e);
+            }
+        }
+
+        Ok(Self { client, model, tool_registry })
+    }
+}
+
+#[async_trait]
+impl AgentRunner for RigRunner {
+    async fn run(&self, input: ContainerInput) -> Result<ContainerOutput> {
+        let system = build_system_prompt(&input);
+
+        let agent = self
+            .client
+            .agent(&self.model)
+            .preamble(&system)
+            .build();
+
+        match agent.prompt(&input.prompt).await {
+            Ok(response) => Ok(ContainerOutput {
+                status: "success".to_string(),
+                result: Some(response),
+                new_session_id: input.session_id,
+                error: None,
+            }),
+            Err(e) => Ok(ContainerOutput {
+                status: "error".to_string(),
+                result: None,
+                new_session_id: input.session_id,
+                error: Some(format!("Rig error: {}", e)),
+            }),
+        }
+    }
+}
+
 pub fn create_runner() -> Result<Box<dyn AgentRunner>> {
     match agent_runner_mode() {
         AgentRunnerMode::Api => {
             let runner = ApiRunner::new()?;
+            Ok(Box::new(runner))
+        }
+        AgentRunnerMode::Rig => {
+            let runner = RigRunner::new()?;
             Ok(Box::new(runner))
         }
         AgentRunnerMode::Container => Ok(Box::new(ContainerRunnerAdapter::new())),

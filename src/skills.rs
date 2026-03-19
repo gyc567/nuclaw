@@ -16,7 +16,20 @@ pub struct SkillMetadata {
     pub extra: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone)]
+/// Skill execution type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillType {
+    /// Pure text prompt (existing behavior)
+    #[default]
+    Text,
+    /// Executable tool with external bindings
+    Tool,
+    /// WASM module (Phase 3)
+    Wasm,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
     pub name: String,
     pub description: String,
@@ -26,6 +39,15 @@ pub struct Skill {
     pub allowed_tools: Option<String>,
     pub content: String,
     pub path: Option<PathBuf>,
+    /// Skill execution type
+    #[serde(default)]
+    pub skill_type: SkillType,
+    /// Tools required for Tool type skills
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// Configuration for skill execution
+    #[serde(default)]
+    pub config: HashMap<String, serde_json::Value>,
 }
 
 impl Skill {
@@ -43,6 +65,35 @@ impl Skill {
             allowed_tools: None,
             content: content.into(),
             path: None,
+            skill_type: SkillType::default(),
+            tools: Vec::new(),
+            config: HashMap::new(),
+        }
+    }
+
+    /// Create a skill from content string (for testing)
+    pub fn from_content(name: &str, content: &str) -> Self {
+        let (frontmatter, body) = parse_frontmatter(content).unwrap_or((
+            Frontmatter {
+                name: name.to_string(),
+                description: String::new(),
+                ..Default::default()
+            },
+            content.to_string(),
+        ));
+
+        Self {
+            name: frontmatter.name,
+            description: frontmatter.description,
+            license: frontmatter.license,
+            compatibility: frontmatter.compatibility,
+            metadata: frontmatter.metadata,
+            allowed_tools: frontmatter.allowed_tools,
+            content: body,
+            path: None,
+            skill_type: frontmatter.skill_type,
+            tools: frontmatter.tools,
+            config: frontmatter.config,
         }
     }
 
@@ -72,6 +123,9 @@ impl Skill {
             allowed_tools: frontmatter.allowed_tools,
             content: body,
             path: Some(dir.to_path_buf()),
+            skill_type: frontmatter.skill_type,
+            tools: frontmatter.tools,
+            config: frontmatter.config,
         })
     }
 
@@ -101,6 +155,11 @@ impl Skill {
 
     pub fn has_assets(&self) -> bool {
         self.assets_dir().map(|p| p.exists()).unwrap_or(false)
+    }
+
+    /// Check if this is a tool skill
+    pub fn is_tool_skill(&self) -> bool {
+        self.skill_type == SkillType::Tool
     }
 
     pub fn validate(&self) -> Vec<SkillValidationError> {
@@ -178,6 +237,12 @@ struct Frontmatter {
     metadata: SkillMetadata,
     #[serde(rename = "allowed-tools", default)]
     allowed_tools: Option<String>,
+    #[serde(rename = "skill-type", default)]
+    skill_type: SkillType,
+    #[serde(default)]
+    tools: Vec<String>,
+    #[serde(default)]
+    config: HashMap<String, serde_json::Value>,
 }
 
 fn parse_frontmatter(content: &str) -> Option<(Frontmatter, String)> {
@@ -573,5 +638,181 @@ description: A minimal skill
 
         assert_eq!(skill.license, Some("MIT".to_string()));
         assert_eq!(skill.compatibility, Some("Requires Docker".to_string()));
+    }
+}
+
+// ============================================================================
+// TDD Tests for Skill Hot-Loading Framework - Phase 1.1: SkillType
+// ============================================================================
+
+#[cfg(test)]
+mod skill_type_tests {
+    use super::*;
+
+    #[test]
+    fn test_skill_type_default() {
+        let skill_type: SkillType = SkillType::default();
+        assert_eq!(skill_type, SkillType::Text);
+    }
+
+    #[test]
+    fn test_skill_type_all_variants() {
+        let text = SkillType::Text;
+        assert_eq!(format!("{:?}", text), "Text");
+        
+        let tool = SkillType::Tool;
+        assert_eq!(format!("{:?}", tool), "Tool");
+        
+        let wasm = SkillType::Wasm;
+        assert_eq!(format!("{:?}", wasm), "Wasm");
+    }
+
+    #[test]
+    fn test_skill_new_has_default_skill_type() {
+        let skill = Skill::new("test", "Test description", "Content");
+        assert_eq!(skill.skill_type, SkillType::Text);
+    }
+
+    #[test]
+    fn test_skill_with_explicit_tool_type() {
+        let mut skill = Skill::new("tool-skill", "A tool skill", "Do something");
+        skill.skill_type = SkillType::Tool;
+        skill.tools = vec!["bash".to_string(), "http".to_string()];
+        
+        assert_eq!(skill.skill_type, SkillType::Tool);
+        assert_eq!(skill.tools.len(), 2);
+        assert!(skill.tools.contains(&"bash".to_string()));
+    }
+
+    #[test]
+    fn test_text_skill_has_empty_tools() {
+        let skill = Skill::new("text-skill", "A text skill", "Content");
+        assert_eq!(skill.skill_type, SkillType::Text);
+        assert!(skill.tools.is_empty());
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_skill_type() {
+        let content = r#"---
+name: tool-skill
+description: A tool skill
+skill-type: tool
+tools:
+  - bash
+  - http
+---
+
+# Tool Skill
+This is a tool skill."#;
+        
+        let (fm, body) = parse_frontmatter(content).unwrap();
+        assert_eq!(fm.name, "tool-skill");
+        assert_eq!(fm.skill_type, SkillType::Tool);
+        assert_eq!(fm.tools, vec!["bash", "http"]);
+        assert!(body.contains("Tool Skill"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_default_skill_type() {
+        let content = r#"---
+name: simple-skill
+description: A simple skill
+---
+
+# Simple"#;
+        
+        let (fm, _body) = parse_frontmatter(content).unwrap();
+        assert_eq!(fm.skill_type, SkillType::Text);
+    }
+
+    #[test]
+    fn test_skill_content_for_tool_type() {
+        let content = r#"---
+name: calculator
+description: A calculator tool
+skill-type: tool
+tools:
+  - bash
+---
+
+# Calculator Tool
+
+You are a calculator. Use bash to perform calculations."#;
+        
+        let skill = Skill::from_content("calculator", content);
+        assert_eq!(skill.skill_type, SkillType::Tool);
+        assert!(skill.content.contains("Calculator"));
+    }
+
+    #[test]
+    fn test_wasm_skill_type() {
+        let content = r#"---
+name: wasm-skill
+description: A WASM skill
+skill-type: wasm
+wasm-path: ./skill.wasm
+---
+
+# WASM Skill
+This runs in WASM."#;
+        
+        let skill = Skill::from_content("wasm-skill", content);
+        assert_eq!(skill.skill_type, SkillType::Wasm);
+    }
+
+    #[test]
+    fn test_tool_skill_multiple_tools() {
+        let mut skill = Skill::new("multi-tool", "Multiple tools", "Content");
+        skill.skill_type = SkillType::Tool;
+        skill.tools = vec![
+            "bash".to_string(),
+            "read".to_string(), 
+            "glob".to_string(),
+            "grep".to_string(),
+        ];
+        
+        assert_eq!(skill.tools.len(), 4);
+        assert!(skill.is_tool_skill());
+    }
+
+    #[test]
+    fn test_is_tool_skill_helper() {
+        let text_skill = Skill::new("text", "Text", "Content");
+        assert!(!text_skill.is_tool_skill());
+        
+        let mut tool_skill = Skill::new("tool", "Tool", "Content");
+        tool_skill.skill_type = SkillType::Tool;
+        assert!(tool_skill.is_tool_skill());
+        
+        let mut wasm_skill = Skill::new("wasm", "Wasm", "Content");
+        wasm_skill.skill_type = SkillType::Wasm;
+        assert!(!wasm_skill.is_tool_skill());
+    }
+
+    #[test]
+    fn test_skill_type_clone() {
+        let original = SkillType::Tool;
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn test_skill_config_field() {
+        let content = r#"---
+name: config-skill
+description: A skill with config
+skill-type: tool
+tools:
+  - bash
+config:
+  timeout: 5000
+  retries: 3
+---
+
+# Config Skill"#;
+        
+        let skill = Skill::from_content("config-skill", content);
+        assert!(!skill.config.is_empty());
+        assert_eq!(skill.config.get("timeout"), Some(&serde_json::json!(5000)));
     }
 }

@@ -456,6 +456,7 @@ mod e2e_tests {
             chat_jid: "test@chat".to_string(),
             is_main: true,
             is_scheduled_task: false,
+            session_workspace_id: None,
         };
 
         assert_eq!(input.prompt, "Test prompt");
@@ -600,6 +601,7 @@ mod e2e_tests {
             chat_jid: "test@chat".to_string(),
             is_main: true,
             is_scheduled_task: false,
+            session_workspace_id: None,
         };
 
         let json = serde_json::to_string(&input).expect("Failed to serialize");

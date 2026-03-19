@@ -82,6 +82,10 @@ async-trait = "0.1"
 
 # File watching for workflow hot reload
 notify = "6.1"
+rig-core = "0.32.0"
+
+# WASM runtime for skill hot loading
+extism = "1.0"
 
 [dev-dependencies]
 libc = "0.2.180"

@@ -1,5 +1,6 @@
 //! Telegram client implementation
 
+use crate::agent_runner::create_runner;
 use crate::config::{assistant_name, data_dir};
 use crate::db::Database;
 use crate::error::{NuClawError, Result};
@@ -37,8 +38,72 @@ pub struct TelegramClient {
     assistant_name: String,
 }
 
+/// Strip unsupported HTML tags for Telegram API
+/// Telegram only supports: b, i, u, s, a, code, pre
+fn strip_unsupported_html_tags(text: &str) -> String {
+    let mut result = text.to_string();
+    
+    // Remove tool_code tags and their content
+    while let Some(start) = result.find("<tool_code") {
+        if let Some(end_tag) = result[start..].find("</tool_code>") {
+            let end = start + end_tag + "</tool_code>".len();
+            result.drain(start..end);
+        } else if let Some(end) = result[start..].find(">") {
+            let end = start + end + 1;
+            result.drain(start..end);
+        } else {
+            break;
+        }
+    }
+    
+    // Remove any other custom XML-like tags
+    let custom_tags = ["tool_code", "tool_result", "function", "artifact"];
+    for tag in custom_tags {
+        // Remove opening tags
+        while let Some(start) = result.find(&format!("<{}", tag)) {
+            if let Some(end) = result[start..].find(">") {
+                result.drain(start..=start + end);
+            } else {
+                break;
+            }
+        }
+        // Remove closing tags
+        while let Some(start) = result.find(&format!("</{}>", tag)) {
+            result.drain(start..start + tag.len() + 3);
+        }
+    }
+    
+    // Also handle self-closing tags
+    while let Some(start) = result.find("<tool_") {
+        if let Some(end) = result[start..].find(">") {
+            result.drain(start..=end);
+        } else {
+            break;
+        }
+    }
+    
+    // Clean up any remaining angle brackets that might cause issues
+    while let Some(pos) = result.find('<') {
+        if let Some(end) = result[pos..].find('>') {
+            let tag = &result[pos..=pos + end];
+            // Keep only supported tags
+            let supported = ["b", "i", "u", "s", "a", "code", "pre", "strong", "em", "strike"];
+            let is_supported = supported.iter().any(|s| tag.starts_with(&format!("<{}", s)));
+            if !is_supported {
+                result.drain(pos..=pos + end);
+            }
+        } else {
+            break;
+        }
+    }
+    
+    result
+}
+
 async fn telegram_send_single_message(api_url: &str, chat_id: i64, text: &str) -> Result<()> {
-    telegram_send_with_retry(api_url, chat_id, text, 3).await
+    // Strip unsupported HTML tags before sending
+    let clean_text = strip_unsupported_html_tags(text);
+    telegram_send_with_retry(api_url, chat_id, &clean_text, 3).await
 }
 
 /// Send message with exponential backoff retry
@@ -158,7 +223,7 @@ impl TelegramClient {
         Ok(())
     }
 
-    pub async fn start_webhook_server(self) -> Result<()> {
+    pub async fn start_webhook_server(mut self) -> Result<()> {
         let addr: SocketAddr = std::env::var("TELEGRAM_WEBHOOK_BIND")
             .unwrap_or_else(|_| "0.0.0.0:8787".to_string())
             .parse()
@@ -168,6 +233,26 @@ impl TelegramClient {
 
         let client = Arc::new(Mutex::new(self));
         let webhook_path = client.lock().await.webhook_path.clone();
+
+        // Start polling in background if no webhook is configured
+        let polling_client = client.clone();
+        tokio::spawn(async move {
+            let mut offset: i64 = 0;
+            loop {
+                match Self::poll_updates(&polling_client, offset).await {
+                    Ok((new_offset, has_updates)) => {
+                        offset = new_offset;
+                        if !has_updates {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Polling error: {}", e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                }
+            }
+        });
 
         let app = Router::new()
             .route(&format!("/{}", webhook_path), post(handle_telegram_webhook))
@@ -227,9 +312,15 @@ impl TelegramClient {
             })
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let chat_jid = format!("telegram:group:{}", msg.chat.id);
+        let chat_jid = if msg.chat.chat_type == "private" {
+            format!("telegram:{}", msg.chat.id)
+        } else {
+            format!("telegram:group:{}", msg.chat.id)
+        };
 
         let content = msg.text.clone().unwrap_or_default();
+
+        debug!("parse_telegram_message: chat_jid={}, content={}", chat_jid, content);
 
         Ok(NewMessage {
             id: msg.message_id.to_string(),
@@ -264,7 +355,7 @@ impl TelegramClient {
             return Ok(None);
         }
 
-        if !self.is_allowed_group(&msg.chat_jid).await? {
+        if msg.chat_jid.contains(":group:") && !self.is_allowed_group(&msg.chat_jid).await? {
             debug!("Message from unregistered group: {}", msg.chat_jid);
             return Ok(None);
         }
@@ -278,10 +369,10 @@ impl TelegramClient {
             }
         }
 
-        let (_, content) = match self.extract_trigger(&msg.content).await {
-            Some((_, c)) => (String::new(), c),
-            None => return Ok(None),
-        };
+        let content = msg.content.trim().to_string();
+        if content.is_empty() {
+            return Ok(None);
+        }
 
         info!(
             "Received message from {}: {}",
@@ -289,43 +380,55 @@ impl TelegramClient {
             crate::telegram::utils::truncate(&content, 50)
         );
 
-        let group_folder =
-            self.get_group_folder(&msg.chat_jid)
-                .await
-                .ok_or_else(|| NuClawError::Telegram {
-                    message: format!("Group not found: {}", msg.chat_jid),
-                })?;
-
         let is_group = msg.chat_jid.contains(":group:");
-        let event = crate::types::AppEvent::ChatMessage {
-            platform: "telegram".to_string(),
-            chat_id: msg.chat_jid.clone(),
-            user_id: msg.sender.clone(),
-            message_id: msg.id.clone(),
-            message_text: content,
+        let group_folder = self.get_group_folder(&msg.chat_jid)
+            .await
+            .unwrap_or_else(|| {
+                if is_group {
+                    panic!("Group not found: {}", msg.chat_jid);
+                }
+                "default".to_string()
+            });
+
+        let input = crate::types::ContainerInput {
+            prompt: content,
+            session_id: Some(format!("telegram_{}", msg.id)),
             group_folder,
-            is_group,
+            chat_jid: msg.chat_jid.clone(),
+            is_main: !is_group,
+            is_scheduled_task: false,
+            session_workspace_id: None,
         };
 
-        let router = crate::router::EventRouter::new(std::sync::Arc::new(crate::runtime::DockerRuntime));
-        let result = tokio::time::timeout(crate::container_runner::container_timeout(), router.dispatch(event)).await;
+        let runner = create_runner()?;
+        let result = tokio::time::timeout(crate::container_runner::container_timeout(), runner.run(input)).await;
+
+        tracing::debug!("Agent result: {:?}", result);
 
         match result {
             Ok(Ok(output)) => {
                 if let Some(response) = output.result {
+                    if response.trim().is_empty() {
+                        tracing::warn!("Agent returned empty response, skipping");
+                        return Ok(None);
+                    }
                     let chat_id = self.extract_chat_id(&msg.chat_jid)?;
                     self.send_message(&chat_id.to_string(), &response).await?;
                     return Ok(Some(response));
                 }
+                error!("Agent returned no result: status={}", output.status);
+                let chat_id = self.extract_chat_id(&msg.chat_jid)?;
+                self.send_message(&chat_id.to_string(), "Sorry, I couldn't process your request.")
+                    .await?;
             }
             Ok(Err(e)) => {
-                error!("Container error: {}", e);
+                error!("Agent error: {}", e);
                 let chat_id = self.extract_chat_id(&msg.chat_jid)?;
                 self.send_message(&chat_id.to_string(), &format!("Error: {}", e))
                     .await?;
             }
             Err(_) => {
-                error!("Container timeout");
+                error!("Agent timeout");
                 let chat_id = self.extract_chat_id(&msg.chat_jid)?;
                 self.send_message(&chat_id.to_string(), "Sorry, the request timed out.")
                     .await?;
@@ -336,6 +439,13 @@ impl TelegramClient {
     }
 
     pub async fn send_message(&self, chat_id: &str, text: &str) -> Result<()> {
+        if text.trim().is_empty() {
+            tracing::warn!("Skipping empty message");
+            return Ok(());
+        }
+        
+        tracing::debug!("send_message called: chat_id={}, text_len={}", chat_id, text.len());
+        
         let cid: i64 = chat_id.parse().map_err(|_| NuClawError::Telegram {
             message: format!("Invalid chat_id: {}", chat_id),
         })?;
@@ -507,6 +617,62 @@ impl TelegramClient {
 
         None
     }
+
+    async fn poll_updates(client: &Arc<Mutex<TelegramClient>>, offset: i64) -> Result<(i64, bool)> {
+        let (api_url, pending_offset) = {
+            let c = client.lock().await;
+            (c.api_url.clone(), offset)
+        };
+
+        debug!("Polling Telegram for updates, offset={}", pending_offset + 1);
+
+        let offset_param = (pending_offset + 1).to_string();
+        let response = reqwest::Client::new()
+            .get(format!("{}/getUpdates", api_url))
+            .query(&[("offset", offset_param.as_str()), ("timeout", "10")])
+            .send()
+            .await
+            .map_err(|e| NuClawError::Telegram {
+                message: format!("Failed to poll updates: {}", e),
+            })?;
+
+        let updates: serde_json::Value = response.json().await.map_err(|e| NuClawError::Telegram {
+            message: format!("Failed to parse updates: {}", e),
+        })?;
+
+        if !updates["ok"].as_bool().unwrap_or(false) {
+            return Err(NuClawError::Telegram {
+                message: format!("Telegram API error: {}", updates),
+            });
+        }
+
+        let updates_array = updates["result"].as_array();
+        debug!("Got {} updates", updates_array.map(|a| a.len()).unwrap_or(0));
+
+        if updates_array.is_none() || updates_array.unwrap().is_empty() {
+            return Ok((pending_offset, false));
+        }
+
+        let mut new_offset = pending_offset;
+        for update in updates_array.unwrap() {
+            let update_id = update["update_id"].as_i64().unwrap_or(pending_offset);
+            if update_id > pending_offset {
+                new_offset = update_id;
+            }
+
+            let tg_update: crate::telegram::types::TelegramUpdate = 
+                serde_json::from_value(update.clone()).map_err(|e| NuClawError::Telegram {
+                    message: format!("Failed to parse update: {}", e),
+                })?;
+
+            let mut client = client.lock().await;
+            if let Err(e) = client.handle_update(&tg_update).await {
+                error!("Failed to handle update: {}", e);
+            }
+        }
+
+        Ok((new_offset, true))
+    }
 }
 
 // Webhook handlers
@@ -548,12 +714,20 @@ pub fn load_registered_groups() -> HashMap<String, RegisteredGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use tempfile::TempDir;
 
     #[test]
     fn test_load_router_state() {
+        // Set up test environment to avoid reading from real config directory
+        let temp_dir = TempDir::new().unwrap();
+        env::set_var("NUCLAW_HOME", temp_dir.path());
+        
         let state = load_router_state();
         assert_eq!(state.last_timestamp, "");
         assert!(state.last_agent_timestamp.is_empty());
+        
+        env::remove_var("NUCLAW_HOME");
     }
 
     #[test]

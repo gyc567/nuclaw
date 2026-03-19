@@ -7,7 +7,6 @@
 use crate::config::nuclaw_home;
 use crate::error::{NuClawError, Result};
 use crate::providers::PROVIDERS;
-use serial_test::serial;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -375,9 +374,9 @@ pub fn print_config_status() -> Result<()> {
 }
 
 #[cfg(test)]
-#[serial]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::env;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -464,6 +463,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_save_and_load_config() {
         let guard = setup_test_env();
 
@@ -484,6 +484,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_config_with_comments() {
         let _guard = setup_test_env();
 
@@ -513,6 +514,7 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
     }
 
     #[test]
+    #[serial]
     fn test_custom_provider_config() {
         let _guard = setup_test_env();
 
@@ -531,6 +533,7 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
     }
 
     #[test]
+    #[serial]
     fn test_save_config_creates_directory() {
         let guard = setup_test_env();
         let test_dir = guard.test_dir.clone();
@@ -549,6 +552,7 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
     }
 
     #[test]
+    #[serial]
     fn test_load_config_partial() {
         let _guard = setup_test_env();
 
@@ -564,6 +568,7 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF
     }
 
     #[test]
+    #[serial]
     fn test_save_config_overwrites() {
         let guard = setup_test_env();
         let test_dir = guard.test_dir.clone();

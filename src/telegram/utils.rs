@@ -59,7 +59,13 @@ pub fn chunk_text_advanced(text: &str, chunk_limit: usize, mode: ChunkMode) -> V
 
 /// Extract chat ID from jid (pure function)
 pub fn extract_chat_id_pure(jid: &str) -> Option<String> {
-    jid.strip_prefix("telegram:group:").map(|s| s.to_string())
+    if let Some(id) = jid.strip_prefix("telegram:group:") {
+        Some(id.to_string())
+    } else if let Some(id) = jid.strip_prefix("telegram:") {
+        Some(id.to_string())
+    } else {
+        None
+    }
 }
 
 /// Check if message is duplicate (pure function)
@@ -106,8 +112,10 @@ pub fn is_allowed_group_pure(
 pub fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
+    } else if max_len <= 3 {
+        s.chars().take(max_len).collect()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        s.chars().take(max_len - 3).collect::<String>() + "..."
     }
 }
 
