@@ -1,0 +1,4 @@
+experiment	score	max_score	pass_rate	status	description
+0	24	30	80.0%	keep	Original skill - baseline established
+1	30	30	100.0%	keep	MANDATORY COVERAGE rule - always include security + error tests
+2	30	30	100.0%	keep	Always include assertions - fixes "mock only" edge case

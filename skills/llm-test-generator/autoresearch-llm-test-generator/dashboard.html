@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autoresearch Dashboard - llm-test-generator</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
+        h1 { color: #58a6ff; margin-bottom: 20px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+        .status { display: inline-block; padding: 4px 12px; border-radius: 16px; font-size: 14px; font-weight: 600; }
+        .status.baseline { background: #388bfd33; color: #58a6ff; }
+        .status.keep { background: #23863633; color: #3fb950; }
+        .status.discard { background: #da363333; color: #f85149; }
+        .status.pending { background: #6e768133; color: #8b949e; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #30363d; }
+        th { color: #8b949e; font-weight: 600; }
+        .score { font-size: 24px; font-weight: bold; }
+        .score.high { color: #3fb950; }
+        .score.medium { color: #d29922; }
+        .score.low { color: #f85149; }
+        .progress { height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; margin: 10px 0; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #238636, #3fb950); transition: width 0.3s; }
+        .eval-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 15px; }
+        .eval-item { background: #21262d; padding: 12px; border-radius: 6px; }
+        .eval-name { color: #58a6ff; font-weight: 600; }
+        .eval-pass { color: #3fb950; }
+        .eval-fail { color: #f85149; }
+        .refresh { color: #8b949e; font-size: 14px; margin-top: 10px; }
+        #chart { margin-top: 20px; height: 200px; }
+    </style>
+</head>
+<body>
+    <h1>🔬 Autoresearch Dashboard</h1>
+    <p style="color: #8b949e;">llm-test-generator Skill Optimization</p>
+    
+    <div class="card">
+        <h2>Current Status</h2>
+        <div id="status" class="status baseline">Baseline Experiment Running...</div>
+        <p class="refresh">Auto-refresh every 10 seconds</p>
+    </div>
+    
+    <div class="card">
+        <h2>Score Summary</h2>
+        <div class="score high" id="current-score">-</div>
+        <p id="score-detail">Waiting for baseline...</p>
+        <div class="progress">
+            <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+        </div>
+        <p style="color: #8b949e; font-size: 12px;">Target: 90%+ (27/30)</p>
+    </div>
+    
+    <div class="card">
+        <h2>Eval Breakdown</h2>
+        <div class="eval-list" id="eval-list">
+            <div class="eval-item"><span class="eval-name">EVAL 1:</span> Coverage</div>
+            <div class="eval-item"><span class="eval-name">EVAL 2:</span> mockall</div>
+            <div class="eval-item"><span class="eval-name">EVAL 3:</span> Quality</div>
+            <div class="eval-item"><span class="eval-name">EVAL 4:</span> Security</div>
+            <div class="eval-item"><span class="eval-name">EVAL 5:</span> Errors</div>
+            <div class="eval-item"><span class="eval-name">EVAL 6:</span> Compile</div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>Experiment History</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Exp</th>
+                    <th>Score</th>
+                    <th>Pass Rate</th>
+                    <th>Status</th>
+                    <th>Change</th>
+                </tr>
+            </thead>
+            <tbody id="exp-table">
+                <tr><td>0</td><td>-</td><td>baseline</td><td><span class="status baseline">baseline</span></td><td>Original skill</td></tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="card">
+        <h2>Instructions</h2>
+        <ol style="color: #c9d1d9; padding-left: 20px; line-height: 1.8;">
+            <li>Load the SKILL.md content</li>
+            <li>Generate tests for each scenario using the skill</li>
+            <li>Score each output against the 6 binary evals</li>
+            <li>Update results.json with scores</li>
+            <li>Dashboard auto-refreshes to show progress</li>
+        </ol>
+    </div>
+    
+    <script>
+        let results = {
+            experiments: [
+                { exp: 0, score: null, status: "baseline", description: "Original skill - no changes" }
+            ],
+            evals: [
+                { name: "Coverage", pass: null, total: 5 },
+                { name: "mockall", pass: null, total: 5 },
+                { name: "Quality", pass: null, total: 5 },
+                { name: "Security", pass: null, total: 5 },
+                { name: "Errors", pass: null, total: 5 },
+                { name: "Compile", pass: null, total: 5 }
+            ],
+            status: "baseline"
+        };
+        
+        function updateDashboard() {
+            // Update status
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = results.status === "running" ? "Running..." : 
+                                   results.status === "baseline" ? "Baseline Complete" : 
+                                   results.status;
+            statusEl.className = "status " + (results.status === "running" ? "pending" : "baseline");
+            
+            // Calculate overall score
+            let totalScore = 0;
+            let totalMax = 0;
+            results.evals.forEach((eval, i) => {
+                const el = document.getElementById('eval-' + i);
+                if (el) {
+                    el.textContent = `${eval.pass}/${eval.total}`;
+                    el.className = eval.pass === eval.total ? "eval-pass" : 
+                                   eval.pass > eval.total * 0.7 ? "eval-pass" : "eval-fail";
+                }
+                if (eval.pass !== null) {
+                    totalScore += eval.pass;
+                    totalMax += eval.total;
+                }
+            });
+            
+            // Update score display
+            const scoreEl = document.getElementById('current-score');
+            const detailEl = document.getElementById('score-detail');
+            const barEl = document.getElementById('progress-bar');
+            
+            if (totalMax > 0) {
+                const pct = (totalScore / totalMax * 100).toFixed(1);
+                scoreEl.textContent = `${totalScore}/${totalMax} (${pct}%)`;
+                scoreEl.className = "score " + (pct >= 90 ? "high" : pct >= 70 ? "medium" : "low");
+                detailEl.textContent = `Based on ${results.experiments.length} experiment(s)`;
+                barEl.style.width = pct + "%";
+            }
+            
+            // Update table
+            const tbody = document.getElementById('exp-table');
+            tbody.innerHTML = results.experiments.map(e => `
+                <tr>
+                    <td>${e.exp}</td>
+                    <td>${e.score !== null ? e.score : '-'}</td>
+                    <td>${e.score !== null ? (e.score / 30 * 100).toFixed(1) + '%' : 'baseline'}</td>
+                    <td><span class="status ${e.status}">${e.status}</span></td>
+                    <td>${e.description}</td>
+                </tr>
+            `).join('');
+        }
+        
+        function saveResults() {
+            localStorage.setItem('llm-test-generator-results', JSON.stringify(results));
+        }
+        
+        // Auto-refresh
+        setInterval(() => {
+            const saved = localStorage.getItem('llm-test-generator-results');
+            if (saved) {
+                results = JSON.parse(saved);
+            }
+            updateDashboard();
+        }, 10000);
+        
+        updateDashboard();
+    </script>
+</body>
+</html>
