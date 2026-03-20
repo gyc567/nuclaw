@@ -10,6 +10,7 @@
 //! - Provider/Channel registry
 
 pub mod agent_runner;
+pub mod auth;
 pub mod autoresearch;
 pub mod channels;
 pub mod config;

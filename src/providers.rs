@@ -742,3 +742,8 @@ mod tests {
         assert_eq!(resp.text_or_empty(), "");
     }
 }
+
+#[cfg(test)]
+mod provider_tests {
+    include!("providers_test_generated.rs");
+}
