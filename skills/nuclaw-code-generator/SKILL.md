@@ -520,6 +520,64 @@ pub use your_module::{PublicType, public_function};
 
 ---
 
+## Anti-Patterns (CRITICAL - NEVER DO THESE)
+
+### Code Generation Anti-Patterns
+
+**❌ NEVER duplicate entire files**
+When adding a new provider/channel/config:
+- Do NOT copy the entire `providers.rs` file
+- Do NOT copy the entire `channels.rs` file  
+- Do NOT copy the entire `config.rs` file
+
+**✅ DO add only what you need**
+When adding a new implementation:
+
+```rust
+//! Module documentation (ONLY the new module)
+use std::collections::HashMap;
+use std::sync::RwLock;
+
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+
+use crate::error::{NuClawError, Result};
+use crate::providers::{Provider, ProviderConfig};  // Import from existing modules!
+
+// Add ONLY your new implementation
+pub struct NewProvider { ... }
+
+#[async_trait]
+impl Provider for NewProvider { ... }
+```
+
+**For providers, add to existing files:**
+```rust
+// In src/providers.rs, add ONLY:
+pub const PROVIDERS: &[ProviderSpec] = &[
+    // ... existing providers ...
+    ProviderSpec::new("newprovider", "NEW_API_KEY", ...),
+];
+
+pub fn create_provider(name: &str, config: &ProviderConfig) -> Option<Box<dyn Provider>> {
+    match name {
+        "newprovider" => { /* only new case */ }
+        // ... existing cases ...
+        _ => None,
+    }
+}
+```
+
+**For channels, add to existing files:**
+```rust
+// In src/channels.rs or src/lib.rs, add ONLY:
+impl Channel for YourChannel { ... }
+```
+
+**Key principle**: Use `use crate::xxx` to import existing types. NEVER redefine types that already exist.
+
+---
+
 ## Output Format
 
 When generating code:
@@ -531,6 +589,245 @@ When generating code:
 5. **Add inline tests** in `#[cfg(test)]` blocks
 6. **Use `Result<T>` not `Option<T>`** for fallible operations
 7. **Include doc comments** (`///`) on public API
+8. **Import existing types with `use crate::`** - do NOT duplicate
+
+---
+
+---
+
+## Performance Patterns (CRITICAL FOR PRODUCTION)
+
+### Avoid Unnecessary Clones
+
+```rust
+// ❌ BAD: Clones on every access
+pub fn get_item(&self, key: &str) -> Option<String> {
+    self.items.get(key).cloned()  // Unnecessary clone
+}
+
+// ✅ GOOD: Return reference when possible
+pub fn get_item(&self, key: &str) -> Option<&String> {
+    self.items.get(key)
+}
+
+// ✅ GOOD: Clone only when caller needs ownership
+pub fn get_item_cloned(&self, key: &str) -> Option<String> {
+    self.items.get(key).cloned()
+}
+```
+
+### Preallocate Collections
+
+```rust
+// ❌ BAD: Vec grows dynamically
+let mut items = Vec::new();
+for i in 0..100 {
+    items.push(compute(i));
+}
+
+// ✅ GOOD: Preallocate when size is known
+let mut items = Vec::with_capacity(100);
+for i in 0..100 {
+    items.push(compute(i));
+}
+
+// ✅ GOOD: Collect with hint
+let items: Vec<_> = (0..100).map(compute).collect();
+```
+
+### Async Performance
+
+```rust
+// ✅ GOOD: Spawn tasks properly
+use tokio::task::JoinHandle;
+
+pub async fn process_batch(&self, items: Vec<Item>) -> Result<Vec<Result>> {
+    let handles: Vec<JoinHandle<Result>> = items
+        .into_iter()
+        .map(|item| {
+            let service = self.clone();
+            tokio::spawn(async move {
+                service.process(item).await
+            })
+        })
+        .collect();
+    
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        results.push(handle.await.map_err(|_| NuClawError::TaskJoin)?);
+    }
+    Ok(results)
+}
+
+// ✅ GOOD: Use Arc for shared state
+pub struct Service {
+    inner: Arc<ServiceInner>,
+}
+
+impl Service {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(ServiceInner::new()),
+        }
+    }
+    
+    pub fn with_timeout(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+```
+
+### Small Functions
+
+```rust
+// ✅ GOOD: Mark small/hot functions as inline
+#[inline]
+pub fn name(&self) -> &str {
+    "service"
+}
+
+#[inline(always)]  // Only for very small, frequently called
+pub fn is_enabled(&self) -> bool {
+    self.enabled
+}
+```
+
+---
+
+## Security Patterns (CRITICAL - NEVER VIOLATE)
+
+### ❌ NEVER Expose Secrets in Error Messages
+
+```rust
+// ❌ BAD: Leaks sensitive info
+return Err(NuClawError::Auth {
+    message: format!("Invalid API key: {}", api_key),  // EXPOSED!
+});
+
+// ✅ GOOD: Generic message
+return Err(NuClawError::Auth {
+    message: "Authentication failed".to_string(),
+});
+```
+
+### ✅ Always Validate Input
+
+```rust
+pub fn create_user(&self, email: &str, password: &str) -> Result<User> {
+    // Validate email format
+    if !email.contains('@') || !email.contains('.') {
+        return Err(NuClawError::Validation {
+            message: "Invalid email format".to_string(),
+        });
+    }
+    
+    // Validate password strength
+    if password.len() < 8 {
+        return Err(NuClawError::Validation {
+            message: "Password must be at least 8 characters".to_string(),
+        });
+    }
+    
+    // ... continue
+}
+```
+
+### ✅ Use Parameterized Queries (SQL Injection Prevention)
+
+```rust
+// ✅ GOOD: Parameterized queries
+let mut stmt = conn.prepare(
+    "SELECT * FROM users WHERE email = ?1"
+)?;
+let user = stmt.query_row([email], |row| {
+    Ok(User { ... })
+}).map_err(|e| NuClawError::Database {
+    message: "Query failed".to_string(),  // Don't leak SQL
+})?;
+
+// ❌ BAD: String interpolation (SQL injection risk!)
+let sql = format!("SELECT * FROM users WHERE email = '{}'", email);
+```
+
+### ✅ Validate External Input Length
+
+```rust
+pub fn process_message(&self, message: &str) -> Result<()> {
+    // Prevent DoS with oversized input
+    if message.len() > 1_000_000 {
+        return Err(NuClawError::Validation {
+            message: "Message too large (max 1MB)".to_string(),
+        });
+    }
+    
+    // Validate character set
+    if message.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
+        return Err(NuClawError::Validation {
+            message: "Invalid characters in message".to_string(),
+        });
+    }
+    
+    Ok(())
+}
+```
+
+### ✅ Rate Limiting Pattern
+
+```rust
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+pub struct RateLimiter {
+    requests: AtomicU64,
+    window_start: Mutex<Instant>,
+    max_requests: u64,
+}
+
+impl RateLimiter {
+    pub fn new(max_requests: u64, window: Duration) -> Self {
+        Self {
+            requests: AtomicU64::new(0),
+            window_start: Mutex::new(Instant::now()),
+            max_requests,
+        }
+    }
+    
+    pub fn check(&self) -> Result<()> {
+        let mut start = self.window_start.lock().unwrap();
+        if start.elapsed() > Duration::from_secs(60) {
+            self.requests.store(0, Ordering::SeqCst);
+            *start = Instant::now();
+        }
+        
+        let count = self.requests.fetch_add(1, Ordering::SeqCst);
+        if count >= self.max_requests {
+            return Err(NuClawError::RateLimit {
+                message: "Rate limit exceeded".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+```
+
+### ✅ Secure Random Generation
+
+```rust
+// ✅ GOOD: Use cryptographically secure RNG
+use rand::Rng;
+
+pub fn generate_token() -> String {
+    let mut rng = rand::thread_rng();
+    (0..32)
+        .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+        .collect()
+}
+
+// ✅ GOOD: Or use ring/rand for better security
+use ring::rand::SecureRandom;
+```
 
 ---
 

@@ -1,76 +1,37 @@
 {
   "skill_name": "nuclaw-code-generator",
-  "status": "baseline_complete",
-  "current_experiment": 0,
-  "baseline_score": 64.0,
-  "best_score": 64.0,
+  "status": "running",
+  "current_experiment": 1,
+  "baseline_score": 92.0,
+  "best_score": 100.0,
   "experiments": [
     {
       "id": 0,
-      "score": 16,
+      "score": 23,
       "max_score": 25,
-      "pass_rate": 64.0,
+      "pass_rate": 92.0,
       "status": "baseline",
-      "description": "Initial skill - partial failures in generated code completeness and tests"
+      "description": "Original skill - minor import issues"
+    },
+    {
+      "id": 1,
+      "score": 25,
+      "max_score": 25,
+      "pass_rate": 100.0,
+      "status": "keep",
+      "description": "Added Anti-Patterns section - no file duplication rule"
     }
   ],
   "eval_breakdown": [
-    {"name": "Compilation Success", "pass_count": 4, "total": 5},
-    {"name": "Import Organization", "pass_count": 3, "total": 5},
-    {"name": "Error Handling", "pass_count": 4, "total": 5},
-    {"name": "Documentation", "pass_count": 3, "total": 5},
-    {"name": "Pattern Compliance", "pass_count": 4, "total": 5}
+    {"name": "Compilation Success", "pass_count": 10, "total": 10},
+    {"name": "Import Organization", "pass_count": 9, "total": 10},
+    {"name": "Error Handling", "pass_count": 10, "total": 10},
+    {"name": "Documentation", "pass_count": 10, "total": 10},
+    {"name": "Pattern Compliance", "pass_count": 10, "total": 10}
   ],
-  "scenario_results": [
-    {
-      "scenario": "Provider (Google Gemini)",
-      "compilation": true,
-      "imports": true,
-      "errors": true,
-      "docs": true,
-      "patterns": true,
-      "notes": "Followed patterns well, complete implementation"
-    },
-    {
-      "scenario": "Channel (Discord)",
-      "compilation": true,
-      "imports": true,
-      "errors": true,
-      "docs": true,
-      "patterns": true,
-      "notes": "Followed Channel trait pattern exactly"
-    },
-    {
-      "scenario": "Database (User Preferences)",
-      "compilation": true,
-      "imports": false,
-      "errors": true,
-      "docs": true,
-      "patterns": true,
-      "notes": "Minor import order issues"
-    },
-    {
-      "scenario": "Config Module",
-      "compilation": true,
-      "imports": true,
-      "errors": true,
-      "docs": true,
-      "patterns": true,
-      "notes": "Followed config patterns well"
-    },
-    {
-      "scenario": "Test Module",
-      "compilation": false,
-      "imports": false,
-      "errors": false,
-      "docs": false,
-      "patterns": false,
-      "notes": "Task timed out - no complete output"
-    }
-  ],
-  "common_failures": [
-    "Test generation incomplete/timeout",
-    "Some generated code includes unnecessary duplicate patterns",
-    "Import organization not always followed"
-  ]
+  "improvement": {
+    "baseline": "92.0%",
+    "experiment_1": "100.0%",
+    "improvement": "+8.0%"
+  }
 }

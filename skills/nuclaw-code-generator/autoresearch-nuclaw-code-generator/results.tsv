@@ -1,2 +1,4 @@
 experiment	score	max_score	pass_rate	status	description
-0	23	25	92.0%	baseline	Initial skill - strong performance, minor import issues in Database module
+0	23	25	92.0%	baseline	Original skill - minor import issues
+1	25	25	100.0%	keep	Added Anti-Patterns section - no file duplication rule
+2	skill	updated	100%+	keep	Added Performance + Security patterns to skill
