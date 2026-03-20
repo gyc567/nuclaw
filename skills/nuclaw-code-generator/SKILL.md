@@ -89,11 +89,73 @@ impl From<std::io::Error> for YourErrorType {
 })?;
 ```
 
+### Fail Fast Principle (CRITICAL)
+
+**Core Rule**: When an error is detected, fail immediately and provide detailed error information.
+
+```rust
+// ✅ GOOD: Fail fast with detailed context
+async fn process_message(&self, msg: &str) -> Result<Response> {
+    // Validate early - fail at the entry point
+    let msg = msg.trim();
+    if msg.is_empty() {
+        return Err(NuClawError::Validation {
+            message: "Message cannot be empty".to_string(),
+        });
+    }
+    
+    // Check prerequisites immediately
+    if !self.is_connected() {
+        return Err(NuClawError::NotReady {
+            message: format!("{} not connected, cannot process message", self.name()),
+        });
+    }
+    
+    // Propagate errors with context
+    let response = self.client.send(msg).await
+        .map_err(|e| NuClawError::Api {
+            message: format!("Failed to send message via {}: {}", self.name(), e),
+        })?;
+    
+    Ok(response)
+}
+```
+
+**Key Principles:**
+1. **Validate at boundaries** - Check inputs immediately when entering a function
+2. **Fail early** - Don't continue processing if prerequisites aren't met
+3. **Rich error messages** - Include all relevant context in errors
+4. **Use `?` operator** - Propagate errors up the stack with `map_err`
+5. **Distinguish error types** - Use specific error variants, not generic strings
+
+```rust
+// ✅ GOOD: Specific error variants
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Database error: {message}")]
+    Database { message: String },
+    
+    #[error("Not ready: {component} - {reason}")]
+    NotReady { component: String, reason: String },
+    
+    #[error("Validation failed: {0}")]
+    Validation(String),
+}
+
+// ❌ BAD: Generic errors lose context
+#[derive(Error, Debug)]
+pub enum BadError {
+    #[error("Error")]
+    Error(String),  // What kind of error? Where?
+}
+```
+
 **Anti-patterns (NEVER do these):**
 - ❌ `.unwrap()` in production code
 - ❌ `.expect("should never fail")` 
 - ❌ `panic!()` except in truly unrecoverable situations
 - ❌ Empty catch blocks
+- ❌ Swallowing errors: `let _ = do_something();`
 
 ---
 
