@@ -43,6 +43,7 @@ pub mod workflow;
 pub mod workspace;
 pub mod skill_creator;
 pub mod workspace_manager;
+pub mod context;
 
 // Re-exports for convenience
 pub use agent_runner::{agent_runner_mode, create_runner, AgentRunner, AgentRunnerMode};

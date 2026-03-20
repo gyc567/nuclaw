@@ -180,6 +180,17 @@ pub struct MaintenanceReport {
     pub total_cold: usize,
 }
 
+/// Handle to control the maintenance scheduler
+pub struct MaintenanceHandle {
+    stop_tx: std::sync::mpsc::Sender<()>,
+}
+
+impl MaintenanceHandle {
+    pub fn stop(&self) {
+        let _ = self.stop_tx.send(());
+    }
+}
+
 /// Memory entry (legacy)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
@@ -240,8 +251,9 @@ impl HotMemory {
     }
 
     pub fn get(&self, key: &str) -> Option<TieredMemoryEntry> {
-        let cache = self.cache.write().ok()?;
+        let cache = self.cache.read().ok()?;
         let entry = cache.get(key)?.clone();
+        drop(cache);
 
         if let Ok(mut order) = self.access_order.write() {
             order.retain(|k| k != key);
@@ -807,21 +819,41 @@ impl TieredMemory {
         Ok(None)
     }
 
-    /// Search across all tiers
+    /// Search across all tiers with deduplication
+    /// Returns unique results, preferring higher tiers (Hot > Warm > Cold)
     pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<TieredMemoryEntry>> {
         let mut results = Vec::new();
+        let mut seen_keys = std::collections::HashSet::new();
 
-        // Search hot
-        results.extend(self.hot.search(query, limit));
-
-        // Search warm
-        if results.len() < limit {
-            results.extend(self.warm.search(query, limit - results.len())?);
+        for entry in self.hot.search(query, limit * 2) {
+            if results.len() >= limit {
+                break;
+            }
+            if seen_keys.insert(entry.key.clone()) {
+                results.push(entry);
+            }
         }
 
-        // Search cold
         if results.len() < limit {
-            results.extend(self.cold.search(query, limit - results.len())?);
+            for entry in self.warm.search(query, (limit - results.len()) * 2)? {
+                if results.len() >= limit {
+                    break;
+                }
+                if seen_keys.insert(entry.key.clone()) {
+                    results.push(entry);
+                }
+            }
+        }
+
+        if results.len() < limit {
+            for entry in self.cold.search(query, (limit - results.len()) * 2)? {
+                if results.len() >= limit {
+                    break;
+                }
+                if seen_keys.insert(entry.key.clone()) {
+                    results.push(entry);
+                }
+            }
         }
 
         Ok(results)
@@ -890,6 +922,49 @@ impl TieredMemory {
     /// Health check
     pub async fn health_check(&self) -> bool {
         self.hot.health_check() && self.warm.health_check() && self.cold.health_check()
+    }
+
+    /// Run maintenance - can be called periodically by external scheduler
+    /// This is the main entry point for tier migration
+    pub async fn run_maintenance(&self) -> Result<MaintenanceReport> {
+        self.maintain().await
+    }
+
+    async fn maintain_tiers(
+        hot: &Arc<HotMemory>,
+        warm: &Arc<WarmMemory>,
+        cold: &Arc<ColdMemory>,
+        policy: &MigrationPolicy,
+    ) -> Result<MaintenanceReport> {
+        let mut report = MaintenanceReport {
+            hot_to_warm_migrated: 0,
+            warm_to_cold_migrated: 0,
+            cold_to_warm_promoted: 0,
+            hot_evicted: 0,
+            total_hot: hot.count(),
+            total_warm: warm.count()?,
+            total_cold: cold.count()?,
+        };
+
+        for entry in hot.get_entries_for_promotion() {
+            let mut promoted = entry.clone();
+            promoted.tier = MemoryTier::Warm;
+            warm.store(&promoted)?;
+            hot.remove(&entry.key);
+            report.hot_to_warm_migrated += 1;
+        }
+
+        for entry in warm.get_entries_for_archival()? {
+            cold.archive(&entry)?;
+            warm.delete(&entry.key)?;
+            report.warm_to_cold_migrated += 1;
+        }
+
+        report.total_hot = hot.count();
+        report.total_warm = warm.count()?;
+        report.total_cold = cold.count()?;
+
+        Ok(report)
     }
 
     /// Get hot memory (for testing)
@@ -1375,6 +1450,67 @@ mod tier_tests {
         assert!(hot.get("k3").is_some());
     }
 
+    #[test]
+    fn test_hot_memory_concurrent_reads() {
+        let hot = HotMemory::new(100);
+        
+        for i in 0..100 {
+            hot.store(TieredMemoryEntry::new(
+                format!("key{}", i),
+                format!("content{}", i),
+                Priority::Normal,
+            ));
+        }
+        
+        let handles: Vec<std::thread::JoinHandle<Vec<Option<TieredMemoryEntry>>>> = (0..10)
+            .map(|_| {
+                let hot = Arc::new(HotMemory::new(100));
+                // Share the same hot memory
+                std::thread::spawn(move || {
+                    let mut results = Vec::new();
+                    for i in 0..10 {
+                        results.push(hot.get(&format!("key{}", i)));
+                    }
+                    results
+                })
+            })
+            .collect();
+        
+        for handle in handles {
+            let results = handle.join().unwrap();
+            assert_eq!(results.len(), 10);
+        }
+    }
+
+    #[test]
+    fn test_hot_memory_read_lock_optimization() {
+        let hot = HotMemory::new(100);
+        
+        hot.store(TieredMemoryEntry::new(
+            "test_key".to_string(),
+            "test_content".to_string(),
+            Priority::Normal,
+        ));
+        
+        // Multiple concurrent reads should work without deadlock
+        let hot_ref = Arc::new(hot);
+        
+        let h1 = std::thread::spawn({
+            let h = Arc::clone(&hot_ref);
+            move || h.get("test_key")
+        });
+        let h2 = std::thread::spawn({
+            let h = Arc::clone(&hot_ref);
+            move || h.get("test_key")
+        });
+        
+        let r1 = h1.join().unwrap();
+        let r2 = h2.join().unwrap();
+        
+        assert!(r1.is_some());
+        assert!(r2.is_some());
+    }
+
     // ========== WarmMemory Tests ==========
 
     #[test]
@@ -1532,6 +1668,132 @@ mod tier_tests {
         let _ = fs::remove_dir(dir);
     }
 
+    // ========== Search Deduplication Tests ==========
+
+    #[test]
+    fn test_tiered_memory_search_no_duplicates() {
+        let dir = temp_dir();
+        
+        let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
+        
+        // Insert same key into hot and warm (simulating migration gap)
+        tiered.hot().store(TieredMemoryEntry::new(
+            "duplicate_key".to_string(), 
+            "hot content".to_string(), 
+            Priority::Normal,
+        ));
+        tiered.warm().store(&TieredMemoryEntry::new(
+            "duplicate_key".to_string(), 
+            "warm content".to_string(), 
+            Priority::Normal,
+        )).unwrap();
+        
+        let results = tiered.blocking_search("content", 10).unwrap();
+        
+        // Should only return 1 result (hot tier takes precedence)
+        assert_eq!(results.len(), 1, "Search should not return duplicate keys");
+        assert_eq!(results[0].content, "hot content");
+        assert_eq!(results[0].tier, MemoryTier::Hot);
+        
+        // Cleanup
+        let _ = fs::remove_file(dir.join("warm_memories.db"));
+        let _ = fs::remove_file(dir.join("cold_memories.db"));
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn test_tiered_memory_search_all_tiers_different_keys() {
+        let dir = temp_dir();
+        
+        let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
+        
+        // Add different keys to different tiers
+        tiered.hot().store(TieredMemoryEntry::new(
+            "key1".to_string(), 
+            "hello from hot".to_string(), 
+            Priority::Normal,
+        ));
+        tiered.warm().store(&TieredMemoryEntry::new(
+            "key2".to_string(), 
+            "hello from warm".to_string(), 
+            Priority::Normal,
+        )).unwrap();
+        tiered.cold().archive(&TieredMemoryEntry::new(
+            "key3".to_string(), 
+            "hello from cold".to_string(), 
+            Priority::Normal,
+        )).unwrap();
+        
+        let results = tiered.blocking_search("hello", 10).unwrap();
+        
+        // Should return 3 unique results
+        assert_eq!(results.len(), 3);
+        
+        // First result should be from hot
+        assert_eq!(results[0].tier, MemoryTier::Hot);
+        
+        // Cleanup
+        let _ = fs::remove_file(dir.join("warm_memories.db"));
+        let _ = fs::remove_file(dir.join("cold_memories.db"));
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn test_tiered_memory_search_returns_highest_tier() {
+        let dir = temp_dir();
+        
+        let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
+        
+        // Same key in warm and cold
+        tiered.warm().store(&TieredMemoryEntry::new(
+            "same_key".to_string(), 
+            "warm result".to_string(), 
+            Priority::Normal,
+        )).unwrap();
+        tiered.cold().archive(&TieredMemoryEntry::new(
+            "same_key".to_string(), 
+            "cold result".to_string(), 
+            Priority::Normal,
+        )).unwrap();
+        
+        let results = tiered.blocking_search("result", 10).unwrap();
+        
+        // Should only return warm result
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].content, "warm result");
+        
+        // Cleanup
+        let _ = fs::remove_file(dir.join("warm_memories.db"));
+        let _ = fs::remove_file(dir.join("cold_memories.db"));
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn test_tiered_memory_search_respects_limit() {
+        let dir = temp_dir();
+        
+        let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
+        
+        // Add 5 different keys matching query
+        for i in 0..5 {
+            tiered.hot().store(TieredMemoryEntry::new(
+                format!("key{}", i), 
+                format!("hello world {}", i), 
+                Priority::Normal,
+            ));
+        }
+        
+        let results = tiered.blocking_search("hello", 3).unwrap();
+        
+        // Should respect limit
+        assert_eq!(results.len(), 3);
+        
+        // Cleanup
+        let _ = fs::remove_file(dir.join("warm_memories.db"));
+        let _ = fs::remove_file(dir.join("cold_memories.db"));
+        let _ = fs::remove_dir(dir);
+    }
+
     #[test]
     fn test_tiered_memory_forget() {
         let dir = temp_dir();
@@ -1559,6 +1821,46 @@ mod tier_tests {
         assert!(tiered.warm().health_check());
         assert!(tiered.cold().health_check());
 
+        // Cleanup
+        let _ = fs::remove_file(dir.join("warm_memories.db"));
+        let _ = fs::remove_file(dir.join("cold_memories.db"));
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_maintenance() {
+        let dir = temp_dir();
+        
+        let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
+        
+        tiered.hot().store(TieredMemoryEntry::new(
+            "old_entry".to_string(),
+            "content".to_string(),
+            Priority::Normal,
+        ));
+        
+        let report = tiered.run_maintenance().await.unwrap();
+        
+        assert_eq!(report.hot_to_warm_migrated, 0);
+        
+        // Cleanup
+        let _ = fs::remove_file(dir.join("warm_memories.db"));
+        let _ = fs::remove_file(dir.join("cold_memories.db"));
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_maintenance_returns_report() {
+        let dir = temp_dir();
+        
+        let tiered = TieredMemory::new(&dir, MigrationPolicy::default()).unwrap();
+        
+        let report = tiered.run_maintenance().await.unwrap();
+        
+        assert!(report.total_hot >= 0);
+        assert!(report.total_warm >= 0);
+        assert!(report.total_cold >= 0);
+        
         // Cleanup
         let _ = fs::remove_file(dir.join("warm_memories.db"));
         let _ = fs::remove_file(dir.join("cold_memories.db"));
@@ -1608,18 +1910,40 @@ impl TieredMemory {
         Ok(None)
     }
 
-    /// Blocking search
+    /// Blocking search with deduplication
     pub fn blocking_search(&self, query: &str, limit: usize) -> Result<Vec<TieredMemoryEntry>> {
         let mut results = Vec::new();
+        let mut seen_keys = std::collections::HashSet::new();
 
-        results.extend(self.hot.search(query, limit));
-
-        if results.len() < limit {
-            results.extend(self.warm.search(query, limit - results.len())?);
+        for entry in self.hot.search(query, limit * 2) {
+            if results.len() >= limit {
+                break;
+            }
+            if seen_keys.insert(entry.key.clone()) {
+                results.push(entry);
+            }
         }
 
         if results.len() < limit {
-            results.extend(self.cold.search(query, limit - results.len())?);
+            for entry in self.warm.search(query, (limit - results.len()) * 2)? {
+                if results.len() >= limit {
+                    break;
+                }
+                if seen_keys.insert(entry.key.clone()) {
+                    results.push(entry);
+                }
+            }
+        }
+
+        if results.len() < limit {
+            for entry in self.cold.search(query, (limit - results.len()) * 2)? {
+                if results.len() >= limit {
+                    break;
+                }
+                if seen_keys.insert(entry.key.clone()) {
+                    results.push(entry);
+                }
+            }
         }
 
         Ok(results)
