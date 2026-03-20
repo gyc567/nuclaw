@@ -1,0 +1,76 @@
+{
+  "skill_name": "nuclaw-code-generator",
+  "status": "baseline_complete",
+  "current_experiment": 0,
+  "baseline_score": 64.0,
+  "best_score": 64.0,
+  "experiments": [
+    {
+      "id": 0,
+      "score": 16,
+      "max_score": 25,
+      "pass_rate": 64.0,
+      "status": "baseline",
+      "description": "Initial skill - partial failures in generated code completeness and tests"
+    }
+  ],
+  "eval_breakdown": [
+    {"name": "Compilation Success", "pass_count": 4, "total": 5},
+    {"name": "Import Organization", "pass_count": 3, "total": 5},
+    {"name": "Error Handling", "pass_count": 4, "total": 5},
+    {"name": "Documentation", "pass_count": 3, "total": 5},
+    {"name": "Pattern Compliance", "pass_count": 4, "total": 5}
+  ],
+  "scenario_results": [
+    {
+      "scenario": "Provider (Google Gemini)",
+      "compilation": true,
+      "imports": true,
+      "errors": true,
+      "docs": true,
+      "patterns": true,
+      "notes": "Followed patterns well, complete implementation"
+    },
+    {
+      "scenario": "Channel (Discord)",
+      "compilation": true,
+      "imports": true,
+      "errors": true,
+      "docs": true,
+      "patterns": true,
+      "notes": "Followed Channel trait pattern exactly"
+    },
+    {
+      "scenario": "Database (User Preferences)",
+      "compilation": true,
+      "imports": false,
+      "errors": true,
+      "docs": true,
+      "patterns": true,
+      "notes": "Minor import order issues"
+    },
+    {
+      "scenario": "Config Module",
+      "compilation": true,
+      "imports": true,
+      "errors": true,
+      "docs": true,
+      "patterns": true,
+      "notes": "Followed config patterns well"
+    },
+    {
+      "scenario": "Test Module",
+      "compilation": false,
+      "imports": false,
+      "errors": false,
+      "docs": false,
+      "patterns": false,
+      "notes": "Task timed out - no complete output"
+    }
+  ],
+  "common_failures": [
+    "Test generation incomplete/timeout",
+    "Some generated code includes unnecessary duplicate patterns",
+    "Import organization not always followed"
+  ]
+}
