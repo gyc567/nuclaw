@@ -417,6 +417,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_openai_provider_config() {
         let _guard = setup_test_env();
 

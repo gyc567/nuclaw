@@ -67,7 +67,9 @@ clap = { version = "4", features = ["derive"] }
 rand = "0.8"
 
 # HTTP client for WhatsApp MCP
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+futures = "0.3"
 
 # Web server for Telegram webhook
 axum = { version = "0.7", features = ["json"] }

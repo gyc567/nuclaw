@@ -1,3 +1,6 @@
+#[cfg(test)]
+use serial_test::serial;
+
 use crate::config::{anthropic_api_key, anthropic_base_url, claude_model};
 use crate::error::{NuClawError, Result};
 use crate::types::{ContainerInput, ContainerOutput};
@@ -38,7 +41,7 @@ pub trait AgentRunner: Send + Sync {
     async fn run(&self, input: ContainerInput) -> Result<ContainerOutput>;
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct AnthropicMessage {
     role: String,
     content: String,
@@ -50,6 +53,28 @@ struct AnthropicRequest {
     messages: Vec<AnthropicMessage>,
     max_tokens: u32,
     system: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AnthropicStreamingRequest {
+    model: String,
+    messages: Vec<AnthropicMessage>,
+    max_tokens: u32,
+    system: Option<String>,
+    #[serde(rename = "stream")]
+    is_streaming: bool,
+}
+
+impl From<&AnthropicRequest> for AnthropicStreamingRequest {
+    fn from(req: &AnthropicRequest) -> Self {
+        Self {
+            model: req.model.clone(),
+            messages: req.messages.clone(),
+            max_tokens: req.max_tokens,
+            system: req.system.clone(),
+            is_streaming: true,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,7 +99,39 @@ struct ApiError {
     message: String,
 }
 
-/// Extract URLs from text
+#[derive(Debug, Deserialize)]
+struct ApiErrorResponse {
+    error: ApiError,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum SSEEvent {
+    #[serde(rename = "content_block_start")]
+    ContentBlockStart,
+    #[serde(rename = "content_block_delta")]
+    ContentBlockDelta { delta: SSEDelta },
+    #[serde(rename = "message_delta")]
+    MessageDelta { delta: SSEDelta },
+    #[serde(rename = "message_stop")]
+    MessageStop,
+}
+
+#[derive(Debug, Deserialize)]
+struct SSEDelta {
+    text: Option<String>,
+}
+
+impl SSEEvent {
+    fn delta_text(&self) -> Option<String> {
+        match self {
+            SSEEvent::ContentBlockDelta { delta } => delta.text.clone(),
+            SSEEvent::MessageDelta { delta } => delta.text.clone(),
+            _ => None,
+        }
+    }
+}
+
 fn extract_urls(text: &str) -> Vec<String> {
     let url_regex = Regex::new(r"https?://[^\s\)]+").unwrap();
     url_regex
@@ -133,6 +190,7 @@ pub struct ApiRunner {
     api_key: String,
     base_url: String,
     model: String,
+    session_history: std::sync::Mutex<std::collections::HashMap<String, Vec<AnthropicMessage>>>,
 }
 
 impl ApiRunner {
@@ -152,7 +210,28 @@ impl ApiRunner {
             api_key,
             base_url,
             model,
+            session_history: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    fn add_to_history(&self, session_id: &str, user_msg: String, assistant_msg: String) {
+        let mut history = self.session_history.lock().unwrap();
+        let messages = history.entry(session_id.to_string()).or_insert_with(Vec::new);
+        messages.push(AnthropicMessage { role: "user".to_string(), content: user_msg });
+        messages.push(AnthropicMessage { role: "assistant".to_string(), content: assistant_msg });
+        if messages.len() > 20 {
+            messages.drain(0..4);
+        }
+    }
+
+    fn get_history(&self, session_id: &str) -> Vec<AnthropicMessage> {
+        let history = self.session_history.lock().unwrap();
+        history.get(session_id).cloned().unwrap_or_default()
+    }
+
+    fn clear_history(&self, session_id: &str) {
+        let mut history = self.session_history.lock().unwrap();
+        history.remove(session_id);
     }
 }
 
@@ -160,42 +239,40 @@ impl ApiRunner {
 impl AgentRunner for ApiRunner {
     async fn run(&self, input: ContainerInput) -> Result<ContainerOutput> {
         let system = build_system_prompt(&input);
+        let session_id = input.session_id.as_deref().unwrap_or("default");
 
         let processed_content = preprocess_prompt(&input.prompt).await;
+        let user_message = processed_content.clone();
 
-        let messages = vec![AnthropicMessage {
+        let mut messages = self.get_history(session_id);
+        messages.push(AnthropicMessage {
             role: "user".to_string(),
             content: processed_content,
-        }];
+        });
 
         let request = AnthropicRequest {
             model: self.model.clone(),
-            messages,
+            messages: messages.clone(),
             max_tokens: 4096,
             system: Some(system),
         };
 
-        let url = format!("{}/v1/messages", self.base_url);
+        let _url = format!("{}/v1/messages", self.base_url);
         let response = self
-            .client
-            .post(&url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| NuClawError::Api {
-                message: format!("HTTP request failed: {}", e),
-            })?;
+            .send_with_retry(&request)
+            .await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            let error_msg = Self::parse_api_error(&body).unwrap_or_else(|| {
+                format!("API request failed with status {}", status)
+            });
             return Ok(ContainerOutput {
                 status: "error".to_string(),
                 result: None,
                 new_session_id: input.session_id,
-                error: Some(format!("API error ({}): {}", status, body)),
+                error: Some(error_msg),
             });
         }
 
@@ -206,18 +283,18 @@ impl AgentRunner for ApiRunner {
 
         tracing::debug!("API response content: {:?}", anthropic_response.content);
 
-        let content = anthropic_response
-            .content
-            .into_iter()
-            .filter_map(|block| {
-                match block {
-                    ContentBlock::Text { text } => Some(text),
-                    ContentBlock::Thinking { text, .. } => text,
-                    ContentBlock::Error { .. } => None,
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let content = Self::extract_response_content(anthropic_response);
+
+        if content.trim().is_empty() {
+            return Ok(ContainerOutput {
+                status: "error".to_string(),
+                result: None,
+                new_session_id: input.session_id,
+                error: Some("Empty response from API".to_string()),
+            });
+        }
+
+        self.add_to_history(session_id, user_message, content.clone());
 
         Ok(ContainerOutput {
             status: "success".to_string(),
@@ -228,22 +305,202 @@ impl AgentRunner for ApiRunner {
     }
 }
 
+impl ApiRunner {
+    fn parse_api_error(body: &str) -> Option<String> {
+        let err: ApiErrorResponse = serde_json::from_str(body).ok()?;
+        Some(err.error.message)
+    }
+
+    fn extract_response_content(response: AnthropicResponse) -> String {
+        response
+            .content
+            .into_iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text),
+                ContentBlock::Thinking { text, .. } => text,
+                ContentBlock::Error { error } => {
+                    Some(format!("[API Error: {}]", error.message))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    async fn send_with_retry(&self, request: &AnthropicRequest) -> Result<reqwest::Response> {
+        let url = format!("{}/v1/messages", self.base_url);
+        self.do_send_with_retry(&url, request).await
+    }
+
+    async fn send_streaming_with_retry(&self, request: &AnthropicStreamingRequest) -> Result<reqwest::Response> {
+        let url = format!("{}/v1/messages", self.base_url);
+        self.do_send_with_retry(&url, request).await
+    }
+
+    async fn do_send_with_retry<T: Serialize>(&self, url: &str, request: &T) -> Result<reqwest::Response> {
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut attempts = 0;
+
+        loop {
+            attempts += 1;
+
+            let resp = self
+                .client
+                .post(url)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(request)
+                .send()
+                .await;
+
+            match resp {
+                Ok(r) => {
+                    let status = r.status();
+                    if status.is_success() {
+                        return Ok(r);
+                    }
+                    if status.as_u16() >= 500 && attempts < MAX_ATTEMPTS {
+                        tracing::warn!(
+                            "API returned {}, retrying ({}/{})",
+                            status,
+                            attempts,
+                            MAX_ATTEMPTS
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_secs(attempts as u64)).await;
+                        continue;
+                    }
+                    return Ok(r);
+                }
+                Err(e) => {
+                    if attempts >= MAX_ATTEMPTS {
+                        return Err(NuClawError::Api {
+                            message: format!("Request failed after {} attempts: {}", MAX_ATTEMPTS, e),
+                        });
+                    }
+                    tracing::warn!(
+                        "API request failed (attempt {}/{}): {}",
+                        attempts,
+                        MAX_ATTEMPTS,
+                        e
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(attempts as u64)).await;
+                }
+            }
+        }
+    }
+
+    pub async fn run_streaming<F>(&self, input: &ContainerInput, mut callback: F) -> Result<ContainerOutput>
+    where
+        F: FnMut(String) + Send,
+    {
+        let system = build_system_prompt(input);
+        let session_id = input.session_id.as_deref().unwrap_or("default");
+
+        let processed_content = preprocess_prompt(&input.prompt).await;
+
+        let mut messages = self.get_history(session_id);
+        messages.push(AnthropicMessage {
+            role: "user".to_string(),
+            content: processed_content.clone(),
+        });
+
+        let request = AnthropicRequest {
+            model: self.model.clone(),
+            messages: messages.clone(),
+            max_tokens: 4096,
+            system: Some(system),
+        };
+
+        let streaming_request = AnthropicStreamingRequest::from(&request);
+
+        let resp = self.send_streaming_with_retry(&streaming_request).await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            let error_msg = Self::parse_api_error(&body).unwrap_or_else(|| {
+                format!("Streaming API failed with status {}", status)
+            });
+            return Ok(ContainerOutput {
+                status: "error".to_string(),
+                result: None,
+                new_session_id: input.session_id.clone(),
+                error: Some(error_msg),
+            });
+        }
+
+        let full_content = self.parse_sse_stream(resp, &mut callback).await?;
+        self.add_to_history(session_id, processed_content, full_content.clone());
+
+        Ok(ContainerOutput {
+            status: "success".to_string(),
+            result: Some(full_content),
+            new_session_id: input.session_id.clone(),
+            error: None,
+        })
+    }
+
+    async fn parse_sse_stream<F>(&self, resp: reqwest::Response, callback: &mut F) -> Result<String>
+    where
+        F: FnMut(String) + Send,
+    {
+        use futures::StreamExt;
+        
+        let mut stream = resp.bytes_stream();
+        let mut buffer = String::new();
+        let mut full_content = String::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| NuClawError::Api {
+                message: format!("Failed to read streaming response: {}", e),
+            })?;
+
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim().to_string();
+                buffer = buffer[line_end + 1..].to_string();
+
+                if line.starts_with("data: ") {
+                    let data = &line[6..];
+                    if data == "[DONE]" {
+                        return Ok(full_content);
+                    }
+                    if let Ok(event) = serde_json::from_str::<SSEEvent>(data) {
+                        if let Some(text) = event.delta_text() {
+                            full_content.push_str(&text);
+                            callback(text);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(full_content)
+    }
+}
+
 fn build_system_prompt(input: &ContainerInput) -> String {
     let mut prompt = String::new();
 
-    prompt.push_str("You are Claude, an AI assistant.\n\n");
+    prompt.push_str("You are Claude, a helpful AI assistant built by Anthropic.\n\n");
 
     if input.is_main {
-        prompt.push_str("You are running in the main context.\n");
+        prompt.push_str("You are running in the **main context** - this is a primary conversation.\n");
     } else {
-        prompt.push_str("You are running in an isolated context.\n");
+        prompt.push_str("You are running in an **isolated context** - treat this as a separate task.\n");
     }
 
     if input.is_scheduled_task {
-        prompt.push_str("This is a scheduled task.\n");
+        prompt.push_str("This is a **scheduled task** - execute autonomously without asking for confirmation.\n");
     }
 
-    prompt.push_str(&format!("Group folder: {}\n", input.group_folder));
+    prompt.push_str(&format!("**Context:** Group folder: `{}`\n", input.group_folder));
+    
+    prompt.push_str("\n**Guidelines:**\n");
+    prompt.push_str("- Provide clear, concise responses\n");
+    prompt.push_str("- Format code blocks with language hints\n");
+    prompt.push_str("- If unsure, say so rather than guessing\n");
+    prompt.push_str("- Break complex tasks into steps\n");
 
     prompt
 }
@@ -405,6 +662,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_agent_runner_mode_default() {
         std::env::remove_var("AGENT_RUNNER_MODE");
         let _guard = with_env_var("AGENT_RUNNER_MODE", "");
@@ -413,6 +671,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_agent_runner_mode_container() {
         std::env::remove_var("AGENT_RUNNER_MODE");
         let _guard = with_env_var("AGENT_RUNNER_MODE", "container");
@@ -420,6 +679,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_agent_runner_mode_api() {
         std::env::remove_var("AGENT_RUNNER_MODE");
         let _guard = with_env_var("AGENT_RUNNER_MODE", "api");
@@ -427,6 +687,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_agent_runner_mode_invalid() {
         std::env::remove_var("AGENT_RUNNER_MODE");
         let _guard = with_env_var("AGENT_RUNNER_MODE", "invalid");
@@ -506,6 +767,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_api_runner_creation_requires_api_key() {
         std::env::remove_var("ANTHROPIC_API_KEY");
         let result = ApiRunner::new();
@@ -513,6 +775,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_api_runner_creation_with_api_key() {
         std::env::remove_var("ANTHROPIC_API_KEY");
         std::env::remove_var("ANTHROPIC_BASE_URL");
@@ -523,5 +786,58 @@ mod tests {
         assert!(result.is_ok());
 
         std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn test_sse_event_parsing_content_block_delta() {
+        let json = r#"{"type":"content_block_delta","delta":{"text":"Hello"}}"#;
+        let event: SSEEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(event.delta_text(), Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn test_sse_event_parsing_message_delta() {
+        let json = r#"{"type":"message_delta","delta":{"text":"World"}}"#;
+        let event: SSEEvent = serde_json::from_str(json).unwrap();
+        assert_eq!(event.delta_text(), Some("World".to_string()));
+    }
+
+    #[test]
+    fn test_sse_event_parsing_content_block_start() {
+        let json = r#"{"type":"content_block_start"}"#;
+        let event: SSEEvent = serde_json::from_str(json).unwrap();
+        assert!(event.delta_text().is_none());
+    }
+
+    #[test]
+    fn test_sse_event_parsing_message_stop() {
+        let json = r#"{"type":"message_stop"}"#;
+        let event: SSEEvent = serde_json::from_str(json).unwrap();
+        assert!(event.delta_text().is_none());
+    }
+
+    #[test]
+    fn test_streaming_request_serialization() {
+        let request = AnthropicRequest {
+            model: "test-model".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            }],
+            max_tokens: 1024,
+            system: Some("You are helpful.".to_string()),
+        };
+        let streaming_request = AnthropicStreamingRequest::from(&request);
+        let json = serde_json::to_string(&streaming_request).unwrap();
+        assert!(json.contains("stream\":true"));
+        assert!(json.contains("test-model"));
+        assert!(json.contains("You are helpful"));
+    }
+
+    #[test]
+    fn test_sse_event_parsing_invalid_json() {
+        let json = r#"{"type":"unknown_type","delta":{"text":"test"}}"#;
+        let result = serde_json::from_str::<SSEEvent>(json);
+        assert!(result.is_err());
     }
 }
