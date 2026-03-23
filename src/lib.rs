@@ -18,6 +18,7 @@ pub mod container_runner;
 pub mod db;
 pub mod discord;
 pub mod error;
+pub mod feishu;
 pub mod logging;
 pub mod maintenance;
 pub mod memory;
@@ -45,6 +46,7 @@ pub mod workspace;
 pub mod skill_creator;
 pub mod workspace_manager;
 pub mod context;
+pub mod skill_installer;
 
 // Re-exports for convenience
 pub use agent_runner::{agent_runner_mode, create_runner, AgentRunner, AgentRunnerMode};
@@ -59,6 +61,11 @@ pub use container_runner::{
     max_output_size, run_container,
 };
 pub use error::{NuClawError, Result};
+pub use feishu::{
+    extract_trigger_pure, is_allowed_chat_pure, load_registered_chats,
+    FeishuClient, FeishuDMPolicy, FeishuGroupPolicy,
+    should_auto_start_feishu,
+};
 pub use onboard::{load_config, print_config_status, run_onboard, save_config};
 pub use orchestrator::{
     Executor, ExecutorConfig, ExecutorEvent, ExecutorStats, Metrics, MetricsSnapshot, Priority,
@@ -87,3 +94,6 @@ pub use workspace_manager::{ResolvedWorkspace, WorkspaceManager, WorkspaceType};
 pub use skill_creator::intent::{IntentDetector, SkillIntent, SkillIntentType};
 pub use skill_creator::writer::SkillWriter;
 pub use skill_creator::eval::{EvalCase, EvalResult, EvalRunner, EvalConfig};
+
+pub use skill_installer::parser::{parse_install_request, InstallRequest};
+pub use skill_installer::git_installer::{GitInstaller, InstallResult};

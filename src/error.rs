@@ -19,6 +19,9 @@ pub enum NuClawError {
     #[error("Telegram error: {message}")]
     Telegram { message: String },
 
+    #[error("Feishu error: {message}")]
+    Feishu { message: String },
+
     #[error("Configuration error: {message}")]
     Config { message: String },
 
@@ -121,6 +124,9 @@ mod tests {
             message: "test".to_string(),
         };
         let _ = NuClawError::Telegram {
+            message: "test".to_string(),
+        };
+        let _ = NuClawError::Feishu {
             message: "test".to_string(),
         };
         let _ = NuClawError::Config {
