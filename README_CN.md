@@ -341,6 +341,19 @@ nuclaw/
 
 我们欢迎贡献！详情请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
+## 作者
+
+### Eric | 瑞哥
+
+- **简介**：前IBM架构师，《区块链核心技术与应用》作者之一，前火币交易所机构事业部/矿池技术负责人
+- **公众号**：「比特财商」主理人
+- **博客**：[https://www.cnblogs.com/gyc567/](https://www.cnblogs.com/gyc567/)
+- **Medium**：[https://medium.com/@gyc567/](https://medium.com/@gyc567/)
+- **X**：[https://x.com/EricBlock2100](https://x.com/EricBlock2100)
+- **GitHub**：[https://github.com/gyc567](https://github.com/gyc567)
+- **Telegram**：@fatoshi_block
+- **坐标**：深圳
+
 ## 路线图
 
 请参阅 [ROADMAP.md](ROADMAP.md) 了解即将推出的功能和计划。
