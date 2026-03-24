@@ -78,7 +78,7 @@ download_prebuilt() {
     local url="https://github.com/${NUCLAW_REPO}/releases/download/v${version}/${filename}"
     local output="/tmp/${filename}"
 
-    log_step "尝试下载预编译二进制: ${os}-${arch}"
+    echo -e "${BLUE}[STEP]${NC} 尝试下载预编译二进制: ${os}-${arch}" >&2
     if curl -fSL --retry 3 --retry-delay 2 -o "$output" "$url" 2>/dev/null; then
         echo "$output"
         return 0
@@ -90,7 +90,7 @@ install_prebuilt() {
     local tarball=$1 install_dir=$2
 
     mkdir -p "$install_dir"
-    tar -xzf "$tarball" -C "$install_dir" --strip-components=1
+    tar -xzf "$tarball" -C "$install_dir"
     chmod +x "${install_dir}/nuclaw"
     rm -f "$tarball"
 
