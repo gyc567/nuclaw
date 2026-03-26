@@ -1,5 +1,5 @@
 use crate::autoresearch::feishu_eval::{
-    FeishuEvalConfig, FeishuEvalResult, FeishuMetric, FeishuMockTokenResponse,
+    FeishuEvalConfig, FeishuEvalResult, FeishuMockTokenResponse,
     FeishuMockWebhookEvent, FeishuTestCase, FeishuTestExpected, FeishuTestInput, FeishuTestResult,
     FeishuTestType,
 };
@@ -517,6 +517,7 @@ pub fn create_default_test_cases() -> Vec<FeishuTestCase> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autoresearch::FeishuMetric;
 
     #[test]
     fn test_default_test_cases() {

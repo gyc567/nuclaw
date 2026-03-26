@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::autoresearch::evaluator::Evaluator;
 use crate::autoresearch::experiment::{
-    ExperimentConfig, ExperimentHistory, ExperimentResult, Metric,
+    ExperimentConfig, ExperimentHistory, ExperimentResult,
 };
 use crate::autoresearch::program::Program;
 use thiserror::Error;
@@ -210,6 +210,7 @@ fn rand_simple() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autoresearch::Metric;
 
     fn test_config() -> ExperimentConfig {
         ExperimentConfig {
