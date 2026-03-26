@@ -75,6 +75,8 @@ futures = "0.3"
 axum = { version = "0.7", features = ["json"] }
 tower = { version = "0.4", features = ["util"] }
 hyper = { version = "0.14", features = ["full"] }
+http = "1"
+tower-http = { version = "0.6", features = ["trace"] }
 
 # Process control for container management
 libc = "0.2"

@@ -1,6 +1,6 @@
 //! Skill validator with tool whitelist
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 
 use crate::skill_installer::error::{InstallError, Result};
@@ -211,15 +211,19 @@ mod tests {
     #[test]
     fn test_validator_config_default() {
         let config = ValidatorConfig::default();
+        // read is in ALLOWED_TOOLS
         assert!(config.allowed_tools.contains(&"read".to_string()));
-        assert!(config.allowed_tools.contains(&"bash".to_string()));
+        // bash is NOT in ALLOWED_TOOLS (it's in FORBIDDEN_TOOLS for security)
+        assert!(!config.allowed_tools.contains(&"bash".to_string()));
     }
 
     #[test]
     fn test_is_tool_allowed() {
         let validator = SkillValidator::with_defaults();
+        // read is allowed
         assert!(validator.is_tool_allowed("read"));
-        assert!(validator.is_tool_allowed("bash"));
+        // bash is NOT allowed (security concern)
+        assert!(!validator.is_tool_allowed("bash"));
         assert!(!validator.is_tool_allowed("unknown_tool"));
     }
 

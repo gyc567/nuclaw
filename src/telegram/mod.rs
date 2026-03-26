@@ -8,6 +8,7 @@ pub mod pairing;
 pub mod policy;
 pub mod types;
 pub mod utils;
+pub mod webhook_security_test;
 
 pub use client::TelegramClient;
 pub use client::{load_registered_groups, load_router_state};

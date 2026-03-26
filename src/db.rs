@@ -100,6 +100,30 @@ impl Database {
             max_size: self.config.pool_size,
         }
     }
+
+    /// Store a message in the database
+    /// This is a common function used by both WhatsApp and Telegram handlers
+    pub fn store_message(&self, msg: &crate::types::NewMessage) -> crate::error::Result<()> {
+        let conn = self.get_connection()?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![
+                msg.id,
+                msg.chat_jid,
+                msg.sender,
+                msg.sender_name,
+                msg.content,
+                msg.timestamp,
+                if msg.id.starts_with("self") { 1 } else { 0 },
+            ],
+        ).map_err(|e| NuClawError::Database {
+            message: format!("Failed to store message: {}", e),
+        })?;
+
+        Ok(())
+    }
 }
 
 /// Pool status information

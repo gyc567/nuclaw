@@ -309,7 +309,15 @@ mod tests {
         let validator = PathValidator::new(vec![temp.path().to_path_buf()]);
         let result = validator.validate(&file);
         assert!(result.is_ok());
-        assert!(result.unwrap().starts_with(temp.path()));
+
+        // On macOS, /var/folders is symlinked to /private/var/folders
+        // So we need to canonicalize both paths before comparison
+        let validated = result.unwrap();
+        let temp_canonical = temp.path().canonicalize().expect("Failed to canonicalize temp path");
+        let validated_canonical = validated.canonicalize().expect("Failed to canonicalize validated path");
+        assert!(validated_canonical.starts_with(&temp_canonical),
+            "Validated path {:?} should start with temp path {:?}",
+            validated_canonical, temp_canonical);
     }
 
     #[test]

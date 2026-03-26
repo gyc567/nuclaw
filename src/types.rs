@@ -111,6 +111,8 @@ pub enum AppEvent {
 pub struct RouterState {
     pub last_timestamp: String,
     pub last_agent_timestamp: HashMap<String, String>,
+    /// Tracks the last message ID per chat to detect duplicates
+    pub last_message_ids: HashMap<String, String>,
 }
 
 #[cfg(test)]
