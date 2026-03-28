@@ -77,12 +77,17 @@ tower = { version = "0.4", features = ["util"] }
 hyper = { version = "0.14", features = ["full"] }
 http = "1"
 tower-http = { version = "0.6", features = ["trace"] }
+bytes = "1"
 
 # Process control for container management
 libc = "0.2"
 
 # Async trait support
 async-trait = "0.1"
+
+# Cryptography for webhook signature verification
+hmac = "0.12"
+sha2 = "0.10"
 
 # Password hashing
 argon2 = "0.5"
