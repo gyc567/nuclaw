@@ -1,6 +1,6 @@
-//! Skill installer module
+//! Skill Installer Module
 //!
-//! Provides functionality to install skills from GitHub repositories
+//! Provides functionality for installing and managing skills from git repositories.
 
 pub mod error;
 pub mod git_installer;

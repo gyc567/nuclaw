@@ -14,10 +14,13 @@ use crate::utils::json::{load_json, save_json};
 
 const PAIRING_CODE_LENGTH: usize = 6;
 
+use axum::body::Body;
 use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::Next;
+use axum::response::Response;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -258,6 +261,7 @@ impl TelegramClient {
         let app = Router::new()
             .route(&format!("/{}", webhook_path), post(handle_telegram_webhook))
             .route("/health", get(health_check))
+            .layer(axum::middleware::from_fn(verify_secret_middleware))
             .with_state(client);
 
         info!("Starting Telegram webhook server on {}", addr);
@@ -406,14 +410,17 @@ impl TelegramClient {
         );
 
         let is_group = msg.chat_jid.contains(":group:");
-        let group_folder = self.get_group_folder(&msg.chat_jid)
-            .await
-            .unwrap_or_else(|| {
+        let group_folder = match self.get_group_folder(&msg.chat_jid).await {
+            Some(folder) => folder,
+            None => {
                 if is_group {
-                    panic!("Group not found: {}", msg.chat_jid);
+                    return Err(NuClawError::Telegram {
+                        message: format!("Group not found: {}", msg.chat_jid),
+                    });
                 }
                 "default".to_string()
-            });
+            }
+        };
 
         let input = crate::types::ContainerInput {
             prompt: content,
@@ -594,27 +601,7 @@ impl TelegramClient {
     }
 
     async fn store_message_background(db: &Database, msg: &NewMessage) -> Result<()> {
-        let conn = db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
-
-        conn.execute(
-            "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            rusqlite::params![
-                msg.id,
-                msg.chat_jid,
-                msg.sender,
-                msg.sender_name,
-                msg.content,
-                msg.timestamp,
-                if msg.id.starts_with("self") { 1 } else { 0 },
-            ],
-        ).map_err(|e| NuClawError::Database {
-            message: format!("Failed to store message: {}", e),
-        })?;
-
-        Ok(())
+        db.store_message(msg)
     }
 
     async fn extract_trigger(&self, content: &str) -> Option<(String, String)> {
@@ -687,6 +674,43 @@ impl TelegramClient {
 }
 
 // Webhook handlers
+
+/// Verify the webhook secret token from request headers
+/// Returns true if:
+/// - No secret is configured (backward compatibility)
+/// - Secret is configured and token matches
+pub(crate) fn verify_webhook_secret(token: Option<&str>) -> bool {
+    let Some(expected_secret) = std::env::var("TELEGRAM_WEBHOOK_SECRET").ok() else {
+        // No secret configured, allow all requests (backward compatibility)
+        return true;
+    };
+
+    match token {
+        Some(received) => received == expected_secret,
+        None => false,
+    }
+}
+
+/// Middleware to verify webhook secret token
+async fn verify_secret_middleware(
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let token = request
+        .headers()
+        .get("x-telegram-bot-api-secret-token")
+        .and_then(|v| v.to_str().ok());
+
+    if !verify_webhook_secret(token) {
+        return Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .body("INVALID_TOKEN".into())
+            .unwrap();
+    }
+
+    next.run(request).await
+}
+
 async fn handle_telegram_webhook(
     State(client): State<Arc<Mutex<TelegramClient>>>,
     Json(update): Json<crate::telegram::types::TelegramUpdate>,

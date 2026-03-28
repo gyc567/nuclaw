@@ -279,54 +279,11 @@ impl WhatsAppClient {
 
     /// Store message in database
     async fn store_message(&self, msg: &NewMessage) -> Result<()> {
-        let conn = self
-            .db
-            .get_connection()
-            .map_err(|e| NuClawError::Database {
-                message: e.to_string(),
-            })?;
-
-        conn.execute(
-            "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            rusqlite::params![
-                msg.id,
-                msg.chat_jid,
-                msg.sender,
-                msg.sender_name,
-                msg.content,
-                msg.timestamp,
-                if msg.id.starts_with("self") { 1 } else { 0 },
-            ],
-        ).map_err(|e| NuClawError::Database {
-            message: format!("Failed to store message: {}", e),
-        })?;
-
-        Ok(())
+        self.db.store_message(msg)
     }
 
     async fn store_message_background(db: &Database, msg: &NewMessage) -> Result<()> {
-        let conn = db.get_connection().map_err(|e| NuClawError::Database {
-            message: e.to_string(),
-        })?;
-
-        conn.execute(
-            "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            rusqlite::params![
-                msg.id,
-                msg.chat_jid,
-                msg.sender,
-                msg.sender_name,
-                msg.content,
-                msg.timestamp,
-                if msg.id.starts_with("self") { 1 } else { 0 },
-            ],
-        ).map_err(|e| NuClawError::Database {
-            message: format!("Failed to store message: {}", e),
-        })?;
-
-        Ok(())
+        db.store_message(msg)
     }
 
     /// Check if a chat is a registered group

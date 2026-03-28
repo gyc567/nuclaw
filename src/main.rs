@@ -11,6 +11,7 @@ use nuclaw::config;
 use nuclaw::container_runner::ensure_container_system_running;
 use nuclaw::db;
 use nuclaw::error::{NuClawError, Result};
+use nuclaw::feishu;
 use nuclaw::logging;
 use nuclaw::onboard;
 use nuclaw::task_scheduler::TaskScheduler;
@@ -38,6 +39,9 @@ struct Args {
 
     #[arg(long)]
     weixin: bool,
+
+    #[arg(long)]
+    feishu: bool,
 
     #[structopt(long)]
     onboard: bool,
@@ -112,6 +116,9 @@ async fn main() -> Result<()> {
     } else if args.telegram {
         // Run Telegram bot
         run_telegram_bot(db).await?;
+    } else if args.feishu {
+        // Run Feishu bot
+        run_feishu_bot(db).await?;
     } else if args.auth {
         // Show authentication QR code
         run_auth_flow().await?;
@@ -158,7 +165,6 @@ async fn run_main_application(db: db::Database) -> Result<()> {
     });
 
     // Auto-start Telegram bot if TELEGRAM_BOT_TOKEN is configured
-    // This runs independently - failure won't affect scheduler
     let telegram_db = db.clone();
     let telegram_handle = tokio::spawn(async move {
         if telegram::should_auto_start_telegram() {
@@ -169,7 +175,20 @@ async fn run_main_application(db: db::Database) -> Result<()> {
             }
         } else {
             info!("TELEGRAM_BOT_TOKEN not set. Telegram bot will not auto-start.");
-            info!("Set TELEGRAM_BOT_TOKEN to enable Telegram bot, or run with --telegram flag.");
+        }
+    });
+
+    // Auto-start Feishu bot if FEISHU_APP_ID and FEISHU_APP_SECRET are configured
+    let feishu_db = db.clone();
+    let feishu_handle = tokio::spawn(async move {
+        if feishu::should_auto_start_feishu() {
+            info!("Auto-starting Feishu bot (FEISHU_APP_ID is set)...");
+            match run_feishu_bot_internal(feishu_db).await {
+                Ok(_) => info!("Feishu bot started successfully"),
+                Err(e) => warn!("Failed to start Feishu bot: {}. Continuing without Feishu...", e),
+            }
+        } else {
+            info!("FEISHU_APP_ID not set. Feishu bot will not auto-start.");
         }
     });
 
@@ -189,6 +208,7 @@ async fn run_main_application(db: db::Database) -> Result<()> {
     let _ = shutdown_tx.send(()).await;
     scheduler_handle.abort();
     telegram_handle.abort();
+    feishu_handle.abort();
 
     info!("NuClaw shutdown complete.");
     Ok(())
@@ -216,7 +236,28 @@ async fn run_telegram_bot_internal(db: db::Database) -> Result<()> {
     Ok(())
 }
 
-/// Run the task scheduler
+/// Internal function to start Feishu bot (used by auto-start)
+async fn run_feishu_bot_internal(db: db::Database) -> Result<()> {
+    let mut client = feishu::FeishuClient::new(db)?;
+    client.connect().await?;
+    info!("Connected to Feishu");
+    client.start_webhook_server().await?;
+    Ok(())
+}
+
+/// Run the Feishu bot
+async fn run_feishu_bot(db: db::Database) -> Result<()> {
+    info!("Starting Feishu bot...");
+    if std::env::var("FEISHU_APP_ID").is_err() {
+        info!("FEISHU_APP_ID not set. Configure it to use Feishu bot.");
+        info!("Usage:");
+        info!("  export FEISHU_APP_ID=your_app_id");
+        info!("  export FEISHU_APP_SECRET=your_app_secret");
+        info!("  ./nuclaw --feishu");
+        return Ok(());
+    }
+    run_feishu_bot_internal(db).await
+}
 async fn run_scheduler(db: db::Database) -> Result<()> {
     info!("Starting task scheduler...");
 

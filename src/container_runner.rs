@@ -737,6 +737,8 @@ impl Clone for ContainerPool {
             max_size: self.max_size,
             min_size: self.min_size,
             enabled: self.enabled,
+            // Clone the semaphore
+            semaphore: Arc::clone(&self.semaphore),
         }
     }
 }
@@ -746,6 +748,8 @@ pub struct ContainerPool {
     pub max_size: usize,
     pub min_size: usize,
     pub enabled: bool,
+    /// Semaphore to limit concurrent container creation
+    semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 impl ContainerPool {
@@ -769,6 +773,8 @@ impl ContainerPool {
             max_size,
             min_size,
             enabled,
+            // Semaphore with max_size permits to limit concurrent container creation
+            semaphore: Arc::new(tokio::sync::Semaphore::new(max_size)),
         }
     }
 
@@ -810,6 +816,8 @@ impl ContainerPool {
         Ok(())
     }
 
+    /// Acquire a container from the pool
+    /// Uses semaphore to prevent race conditions during container creation
     pub async fn acquire(&self, group_folder: &str) -> Option<PooledContainer> {
         if !self.enabled {
             return None;
@@ -828,33 +836,38 @@ impl ContainerPool {
             }
         }
 
-        // Try to create a new container if under limit
-        // Double-check after acquiring lock to prevent race condition
+        // Need to create a new container - use semaphore to limit concurrency
+        // Acquire permit - will wait if no permits available
+        let _permit = match self.semaphore.acquire().await {
+            Ok(p) => p,
+            Err(_) => return None, // Pool was closed
+        };
+
+        // We have a permit, proceed with container creation
+        let mut containers = self.containers.lock().await;
+
+        // Check if we can still create a new container (another thread might have created one)
         if containers.len() < self.max_size {
             let new_id = format!("{}{}", CONTAINER_NAME_PREFIX, containers.len());
             let new_group_folder = group_folder.to_string();
 
-            // Check again to avoid race condition
-            if containers.len() < self.max_size {
-                // Release lock before async operation
-                drop(containers);
+            // Release lock before async operation
+            drop(containers);
 
-                if start_pooled_container(&new_id, &new_group_folder)
-                    .await
-                    .is_ok()
-                {
+            // Start the container
+            match start_pooled_container(&new_id, &new_group_folder).await {
+                Ok(_) => {
                     let mut containers = self.containers.lock().await;
 
-                    // Final check after acquiring lock
+                    // Double-check size after async operation
                     if containers.len() < self.max_size {
-                        containers.insert(
-                            new_id.clone(),
-                            PooledContainerInner {
-                                container_id: new_id.clone(),
-                                group_folder: new_group_folder.clone(),
-                                in_use: true,
-                            },
-                        );
+                        let inner = PooledContainerInner {
+                            container_id: new_id.clone(),
+                            group_folder: new_group_folder.clone(),
+                            in_use: true,
+                        };
+                        containers.insert(new_id.clone(), inner);
+
                         return Some(PooledContainer {
                             inner: Arc::new(Mutex::new(PooledContainerInner {
                                 container_id: new_id,
@@ -865,12 +878,20 @@ impl ContainerPool {
                         });
                     }
                 }
+                Err(_) => {
+                    // Container creation failed
+                }
             }
         }
 
+        // Failed to create container - permit will be released when _permit is dropped
         None
     }
 
+    /// Release a container back to the pool
+    /// Note: This is typically called automatically when PooledContainer is dropped
+    /// Kept for manual release if needed
+    #[allow(dead_code)]
     pub async fn release(&self, container_id: &str) {
         if !self.enabled {
             return;

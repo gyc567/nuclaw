@@ -12,6 +12,10 @@ pub enum InstallError {
     #[error("Invalid skill name: {0}")]
     InvalidName(String),
 
+    /// Skill not found
+    #[error("Skill not found: {0}")]
+    NotFound(String),
+
     /// Skill already exists
     #[error("Skill already exists: {0}. Use --force to overwrite.")]
     AlreadyExists(String),
@@ -47,10 +51,6 @@ pub enum InstallError {
     /// Skill source not allowed
     #[error("Skill source not allowed: {0}")]
     SourceNotAllowed(String),
-
-    /// Skill not found
-    #[error("Skill not found: {0}")]
-    NotFound(String),
 }
 
 impl From<reqwest::Error> for InstallError {

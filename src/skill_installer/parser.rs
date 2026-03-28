@@ -175,11 +175,12 @@ mod tests {
 
     #[test]
     fn test_extract_github_url() {
+        // Note: The function only matches URLs that start with http:// or https://
         let cases = vec![
             ("https://github.com/owner/repo", Some(("https://github.com/owner/repo".to_string(), None))),
             ("https://github.com/owner/repo/", Some(("https://github.com/owner/repo".to_string(), None))),
             ("https://github.com/owner/repo.git", Some(("https://github.com/owner/repo".to_string(), None))),
-            ("install https://github.com/openclaw/skills/tree/main/skills/24601/agent-deep-research", 
+            ("install https://github.com/openclaw/skills/tree/main/skills/24601/agent-deep-research",
              Some(("https://github.com/openclaw/skills".to_string(), Some("skills/24601/agent-deep-research".to_string())))),
             ("https://github.com/test/repo", Some(("https://github.com/test/repo".to_string(), None))),
             ("not a github url", None),
@@ -216,23 +217,28 @@ mod tests {
 
     #[test]
     fn test_parse_install_request() {
-        // Test basic install
-        let msg = "install https://github.com/owner/repo";
+        // Test basic install - note: trigger must contain one of TRIGGER_WORDS
+        let msg = "install skill https://github.com/owner/repo";
         let result = parse_install_request(msg);
-        assert!(result.is_some());
+        assert!(result.is_some(), "Failed for: {}", msg);
         let req = result.unwrap();
         assert_eq!(req.owner, "owner");
         assert_eq!(req.repo, "repo");
         assert!(!req.force);
 
+        // Test with Chinese trigger
+        let msg = "安装 https://github.com/owner/repo";
+        let result = parse_install_request(msg);
+        assert!(result.is_some());
+
         // Test with --force
-        let msg = "安装 https://github.com/owner/repo --force";
+        let msg = "安装技能 https://github.com/owner/repo --force";
         let result = parse_install_request(msg);
         assert!(result.is_some());
         assert!(result.unwrap().force);
 
         // Test with name
-        let msg = "install https://github.com/owner/repo -n my-skill";
+        let msg = "install skill https://github.com/owner/repo -n my-skill";
         let result = parse_install_request(msg);
         assert!(result.is_some());
         assert_eq!(result.unwrap().target_name, Some("my-skill".to_string()));

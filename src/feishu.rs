@@ -9,11 +9,14 @@ use crate::types::{NewMessage, RegisteredGroup, RouterState};
 use crate::utils::json::{load_json, save_json};
 
 use async_trait::async_trait;
+use axum::body::Body;
 use axum::extract::State;
 use axum::routing::{get, post};
-use axum::{Json, Router};
-use axum::http::StatusCode;
+use axum::{Router};
+use axum::http::{HeaderMap, StatusCode};
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -39,6 +42,9 @@ pub struct FeishuClient {
     tenant_access_token: Option<String>,
     token_expires_at: Option<std::time::Instant>,
     webhook_path: String,
+    /// Webhook secret for signature verification
+    webhook_secret: Option<String>,
+    /// DM policy
     dm_policy: FeishuDMPolicy,
     allowed_chats: Vec<String>,
     registered_chats: HashMap<String, RegisteredGroup>,
@@ -280,6 +286,7 @@ impl FeishuClient {
             token_expires_at: None,
             webhook_path: std::env::var("FEISHU_WEBHOOK_PATH")
                 .unwrap_or_else(|_| "feishu-webhook".to_string()),
+            webhook_secret: std::env::var("FEISHU_WEBHOOK_SECRET").ok(),
             dm_policy: FeishuDMPolicy::parse(
                 &std::env::var("FEISHU_DM_POLICY").unwrap_or_else(|_| "pairing".to_string()),
             ),
@@ -513,16 +520,67 @@ impl FeishuClient {
             truncate(&content, 50)
         );
 
-        let _is_group = msg.chat_jid.contains(":chat:");
+        let is_group = msg.chat_jid.contains(":chat:");
+        let group_folder = match self.get_group_folder(&msg.chat_jid).await {
+            Some(folder) => folder,
+            None => {
+                if is_group {
+                    return Err(NuClawError::Feishu {
+                        message: format!("Group not found: {}", msg.chat_jid),
+                    });
+                }
+                "default".to_string()
+            }
+        };
+
+        let input = crate::types::ContainerInput {
+            prompt: content.clone(),
+            session_id: Some(format!("feishu_{}", msg.id)),
+            group_folder,
+            chat_jid: msg.chat_jid.clone(),
+            is_main: !is_group,
+            is_scheduled_task: false,
+            session_workspace_id: None,
+        };
+
+        let runner = crate::agent_runner::create_runner()?;
+        let result = tokio::time::timeout(
+            crate::container_runner::container_timeout(),
+            runner.run(input)
+        ).await;
+
+        tracing::debug!("Agent result: {:?}", result);
+
         let chat_id = self.extract_chat_id(&msg.chat_jid)?;
 
-        // Build the response
-        let response = format!("Feishu message received: {}", content);
+        match result {
+            Ok(Ok(output)) => {
+                if let Some(response) = output.result {
+                    if response.trim().is_empty() {
+                        tracing::warn!("Agent returned empty response, skipping");
+                        return Ok(None);
+                    }
+                    self.ensure_valid_token().await?;
+                    self.send_message(&chat_id, &response).await?;
+                    return Ok(Some(response));
+                }
+                error!("Agent returned no result: status={}", output.status);
+                self.ensure_valid_token().await?;
+                self.send_message(&chat_id, "Sorry, I couldn't process your request.").await?;
+            }
+            Ok(Err(e)) => {
+                error!("Agent error: {}", e);
+                self.ensure_valid_token().await?;
+                self.send_message(&chat_id, &format!("Error: {}", e)).await?;
+            }
+            Err(_) => {
+                error!("Agent timeout");
+                self.ensure_valid_token().await?;
+                self.send_message(&chat_id, "Sorry, the request timed out.").await?;
+            }
+        }
 
-        // Send response back
-        self.send_message(&chat_id, &response).await?;
-
-        Ok(Some(response))
+        Ok(None)
     }
 
     /// Send a message to a Feishu chat
@@ -609,7 +667,6 @@ impl FeishuClient {
     }
 
     fn extract_chat_id(&self, jid: &str) -> Result<String> {
-        // Extract the actual chat/user ID from the jid
         if let Some(id) = jid.strip_prefix("feishu:chat:") {
             Ok(id.to_string())
         } else if let Some(id) = jid.strip_prefix("feishu:user:") {
@@ -617,6 +674,10 @@ impl FeishuClient {
         } else {
             Ok(jid.to_string())
         }
+    }
+
+    async fn get_group_folder(&self, jid: &str) -> Option<String> {
+        self.registered_chats.get(jid).map(|g| g.folder.clone())
     }
 
     async fn is_duplicate_message(&self, msg: &NewMessage) -> bool {
@@ -685,8 +746,49 @@ impl FeishuClient {
 // Webhook handlers
 async fn handle_feishu_webhook(
     State(client): State<Arc<Mutex<FeishuClient>>>,
-    Json(event): Json<FeishuReceiveMessage>,
+    headers: HeaderMap,
+    body: Body,
 ) -> (StatusCode, &'static str) {
+    let bytes = match axum::body::to_bytes(body, 10_000_000).await {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Failed to read body: {}", e);
+            return (StatusCode::BAD_REQUEST, "BAD_REQUEST");
+        }
+    };
+    
+    let client_guard = client.lock().await;
+    if let Some(ref secret) = client_guard.webhook_secret {
+        let signature = headers
+            .get("X-Feishu-Signature")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        let timestamp = headers
+            .get("X-Feishu-Timestamp")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        
+        if signature.is_empty() || timestamp.is_empty() {
+            warn!("Missing signature or timestamp headers");
+            return (StatusCode::UNAUTHORIZED, "UNAUTHORIZED");
+        }
+        
+        if !verify_webhook_signature(&bytes, timestamp, signature, secret) {
+            warn!("Invalid webhook signature");
+            return (StatusCode::UNAUTHORIZED, "UNAUTHORIZED");
+        }
+    }
+    
+    let body_str = String::from_utf8_lossy(&bytes);
+    let event: FeishuReceiveMessage = match serde_json::from_str(&body_str) {
+        Ok(e) => e,
+        Err(e) => {
+            error!("Failed to parse Feishu event: {}", e);
+            return (StatusCode::BAD_REQUEST, "BAD_REQUEST");
+        }
+    };
+    
+    drop(client_guard);
     let mut client = client.lock().await;
     match client.handle_event(&event).await {
         Ok(_) => (StatusCode::OK, "OK"),
@@ -704,6 +806,62 @@ async fn health_check() -> (StatusCode, &'static str) {
 /// Determines whether Feishu should auto-start based on environment configuration.
 pub fn should_auto_start_feishu() -> bool {
     std::env::var("FEISHU_APP_ID").is_ok() && std::env::var("FEISHU_APP_SECRET").is_ok()
+}
+
+/// Verify Feishu webhook signature
+fn verify_webhook_signature(
+    body: &[u8],
+    timestamp: &str,
+    signature: &str,
+    secret: &str,
+) -> bool {
+    let mut hasher = Sha256::new();
+    hasher.update(timestamp.as_bytes());
+    hasher.update(body);
+    let result = hasher.finalize();
+    
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<Sha256>;
+    
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+    mac.update(&result);
+    
+    match base64_decode(signature) {
+        Ok(expected) => mac.verify_slice(&expected).is_ok(),
+        Err(_) => false,
+    }
+}
+
+fn base64_decode(input: &str) -> std::result::Result<Vec<u8>, &'static str> {
+    // Simple base64 decoder for webhook verification
+    const BASE64_TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    
+    let input = input.trim_end_matches('=');
+    let mut result = Vec::with_capacity(input.len() * 3 / 4);
+    
+    let mut buffer: u32 = 0;
+    let mut bits_collected = 0;
+    
+    for byte in input.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return Err("Invalid base64 character"),
+        };
+        
+        buffer = (buffer << 6) | (value as u32);
+        bits_collected += 6;
+        
+        if bits_collected >= 8 {
+            bits_collected -= 8;
+            result.push((buffer >> bits_collected) as u8);
+        }
+    }
+    
+    Ok(result)
 }
 
 #[cfg(test)]

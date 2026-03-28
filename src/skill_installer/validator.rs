@@ -203,6 +203,7 @@ mod tests {
     #[test]
     fn test_validator_config_default() {
         let config = ValidatorConfig::default();
+        // read is in ALLOWED_TOOLS
         assert!(config.allowed_tools.contains(&"read".to_string()));
         // bash is forbidden for security in external skills
         assert!(!config.allowed_tools.contains(&"bash".to_string()));
@@ -211,6 +212,7 @@ mod tests {
     #[test]
     fn test_is_tool_allowed() {
         let validator = SkillValidator::with_defaults();
+        // read is allowed
         assert!(validator.is_tool_allowed("read"));
         // bash is forbidden for security reasons
         assert!(!validator.is_tool_allowed("bash"));
