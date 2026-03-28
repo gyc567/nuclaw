@@ -136,7 +136,7 @@ impl PairingManager {
             .insert(pending.user_id.clone(), authorized);
         self.storage
             .pending_codes
-            .retain(|k, v| k != &pending.user_id);
+            .retain(|k, _v| k != &pending.user_id);
         self.save()?;
 
         Ok(())

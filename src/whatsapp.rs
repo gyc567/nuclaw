@@ -10,8 +10,7 @@ use crate::types::{NewMessage, RegisteredGroup, RouterState};
 use crate::utils::json::{load_json, save_json};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 use tracing::{debug, error, info};
 
 use crate::router::EventRouter;
@@ -262,30 +261,14 @@ impl WhatsAppClient {
         Ok(())
     }
 
-    /// Check if message is duplicate
     async fn is_duplicate_message(&self, msg: &NewMessage) -> bool {
-        let last_timestamp = &self.router_state.last_timestamp;
-        let last_agent = self.router_state.last_agent_timestamp.get(&msg.chat_jid);
-
-        if last_timestamp == &msg.timestamp {
-            return true;
-        }
-
-        if let Some(agent_ts) = last_agent {
-            if agent_ts == &msg.timestamp {
-                return true;
-            }
-        }
-
-        false
+        is_duplicate_message_pure(msg, &self.router_state.last_message_ids)
     }
 
-    /// Update router state after processing
     async fn update_router_state(&mut self, msg: &NewMessage) {
-        self.router_state.last_timestamp = msg.timestamp.clone();
         self.router_state
-            .last_agent_timestamp
-            .insert(msg.chat_jid.clone(), msg.timestamp.clone());
+            .last_message_ids
+            .insert(msg.chat_jid.clone(), msg.id.clone());
 
         let router_state = self.router_state.clone();
         tokio::spawn(async move {
@@ -371,16 +354,9 @@ fn get_mcp_url() -> Result<String> {
     })
 }
 
-/// Load router state from file
 pub fn load_router_state() -> RouterState {
     let state_path = data_dir().join("router_state.json");
-    load_json(
-        &state_path,
-        RouterState {
-            last_timestamp: String::new(),
-            last_agent_timestamp: HashMap::new(),
-        },
-    )
+    load_json(&state_path, RouterState::default())
 }
 
 /// Load registered groups from file
@@ -420,22 +396,15 @@ pub fn extract_trigger_pure(content: &str, assistant_name: &str) -> Option<(Stri
     None
 }
 
-/// Check if message is duplicate (pure function)
 pub fn is_duplicate_message_pure(
     msg: &NewMessage,
-    last_timestamp: &str,
-    last_agent_timestamps: &std::collections::HashMap<String, String>,
+    last_message_ids: &std::collections::HashMap<String, String>,
 ) -> bool {
-    if last_timestamp == msg.timestamp {
-        return true;
-    }
-
-    if let Some(agent_ts) = last_agent_timestamps.get(&msg.chat_jid) {
-        if agent_ts == &msg.timestamp {
+    if let Some(last_id) = last_message_ids.get(&msg.chat_jid) {
+        if last_id == &msg.id {
             return true;
         }
     }
-
     false
 }
 
@@ -571,19 +540,12 @@ mod tests {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
         };
 
-        let mut agent_ts = std::collections::HashMap::new();
-        agent_ts.insert(
-            "123@s.whatsapp.net".to_string(),
-            "2025-01-01T00:00:00Z".to_string(),
-        );
-
-        assert!(is_duplicate_message_pure(
-            &msg,
-            "2025-01-01T00:00:00Z",
-            &HashMap::new()
-        ));
-        assert!(is_duplicate_message_pure(&msg, "old", &agent_ts));
-        assert!(!is_duplicate_message_pure(&msg, "old", &HashMap::new()));
+        assert!(!is_duplicate_message_pure(&msg, &HashMap::new()));
+        let mut ids = HashMap::new();
+        ids.insert("123@s.whatsapp.net".to_string(), "1".to_string());
+        assert!(is_duplicate_message_pure(&msg, &ids));
+        ids.insert("123@s.whatsapp.net".to_string(), "0".to_string());
+        assert!(!is_duplicate_message_pure(&msg, &ids));
     }
 
     #[test]

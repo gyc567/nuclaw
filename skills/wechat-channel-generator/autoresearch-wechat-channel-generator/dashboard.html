@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autoresearch Dashboard - wechat-channel-generator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        .header {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .header h1 { color: #333; margin-bottom: 8px; }
+        .header .subtitle { color: #666; font-size: 14px; }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 16px;
+        }
+        .status-running { background: #fff3cd; color: #856404; }
+        .status-complete { background: #d4edda; color: #155724; }
+        .status-idle { background: #e2e3e5; color: #383d41; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+        .stat-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .stat-value { font-size: 28px; font-weight: 700; color: #333; }
+        .stat-value.green { color: #28a745; }
+        .stat-value.blue { color: #007bff; }
+        .stat-value.orange { color: #fd7e14; }
+
+        .chart-section {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+        .card h2 { font-size: 16px; color: #333; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #f0f0f0; }
+        
+        .experiment-table { width: 100%; border-collapse: collapse; }
+        .experiment-table th {
+            text-align: left;
+            padding: 10px 12px;
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        .experiment-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f5f5f5;
+            font-size: 13px;
+        }
+        .experiment-table tr:hover { background: #fafafa; }
+        
+        .status-pill {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .pill-baseline { background: #e3f2fd; color: #1565c0; }
+        .pill-keep { background: #d4edda; color: #155724; }
+        .pill-discard { background: #f8d7da; color: #721c24; }
+
+        .eval-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        .eval-item {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .eval-name { font-size: 12px; color: #555; font-weight: 500; }
+        .eval-bar-wrap { flex: 1; margin: 0 12px; background: #e9ecef; border-radius: 4px; height: 8px; overflow: hidden; }
+        .eval-bar { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+        .eval-bar.high { background: linear-gradient(90deg, #28a745, #20c997); }
+        .eval-bar.medium { background: linear-gradient(90deg, #ffc107, #fd7e14); }
+        .eval-bar.low { background: linear-gradient(90deg, #dc3545, #c82333); }
+        .eval-pct { font-size: 12px; font-weight: 600; color: #333; min-width: 40px; text-align: right; }
+
+        .canvas-wrap { position: relative; height: 250px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 Autoresearch Dashboard <span id="status-badge" class="status-badge status-idle">Idle</span></h1>
+            <div class="subtitle">
+                Skill: <strong>wechat-channel-generator</strong> | 
+                ilink HTTP gateway WeChat channel for NuClaw
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Baseline Score</div>
+                <div class="stat-value blue" id="baseline-score">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Best Score</div>
+                <div class="stat-value green" id="best-score">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Experiments</div>
+                <div class="stat-value orange" id="total-experiments">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Keep Rate</div>
+                <div class="stat-value" id="keep-rate">—</div>
+            </div>
+        </div>
+
+        <div class="chart-section">
+            <div class="card">
+                <h2>📈 Score Progression</h2>
+                <div class="canvas-wrap">
+                    <canvas id="progressionChart"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <h2>📊 Eval Breakdown</h2>
+                <div class="eval-grid" id="eval-grid">
+                    <!-- Filled by JS -->
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📋 Experiment History</h2>
+            <table class="experiment-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Score</th>
+                        <th>Pass Rate</th>
+                        <th>Status</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody id="experiment-body">
+                    <tr><td colspan="5" style="text-align:center;color:#999;padding:24px;">No experiments yet — run baseline to start</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let chart = null;
+
+        function loadData() {
+            fetch('results.json')
+                .then(r => r.json())
+                .then(data => updateDashboard(data))
+                .catch(() => {
+                    document.getElementById('status-badge').textContent = 'No Data';
+                    document.getElementById('status-badge').className = 'status-badge status-idle';
+                });
+        }
+
+        function updateDashboard(data) {
+            // Status
+            const badge = document.getElementById('status-badge');
+            if (data.status === 'running') {
+                badge.textContent = `Running #${data.current_experiment}...`;
+                badge.className = 'status-badge status-running';
+            } else if (data.status === 'complete') {
+                badge.textContent = 'Complete';
+                badge.className = 'status-badge status-complete';
+            } else {
+                badge.textContent = 'Idle';
+                badge.className = 'status-badge status-idle';
+            }
+
+            // Stats
+            document.getElementById('baseline-score').textContent = 
+                data.baseline_score !== null ? `${data.baseline_score.toFixed(1)}%` : '—';
+            document.getElementById('best-score').textContent = 
+                data.best_score !== null ? `${data.best_score.toFixed(1)}%` : '—';
+            document.getElementById('total-experiments').textContent = data.experiments.length;
+
+            const kept = data.experiments.filter(e => e.status === 'keep').length;
+            const rate = data.experiments.length > 0 
+                ? `${((kept / data.experiments.length) * 100).toFixed(0)}%` 
+                : '—';
+            document.getElementById('keep-rate').textContent = rate;
+
+            // Chart
+            const ctx = document.getElementById('progressionChart').getContext('2d');
+            if (chart) chart.destroy();
+            
+            const labels = data.experiments.map(e => `Exp ${e.id}`);
+            const scores = data.experiments.map(e => e.pass_rate);
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Pass Rate %',
+                        data: scores,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102,126,234,0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 6,
+                        pointBackgroundColor: data.experiments.map(e => 
+                            e.status === 'keep' ? '#28a745' : 
+                            e.status === 'discard' ? '#dc3545' : '#007bff'
+                        ),
+                        pointBorderColor: 'white',
+                        pointBorderWidth: 2,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: (item) => {
+                                    const exp = data.experiments[item.dataIndex];
+                                    return `${exp.status.toUpperCase()} — ${exp.description}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: { 
+                            min: 0, 
+                            max: 100,
+                            ticks: { callback: v => v + '%' }
+                        }
+                    }
+                }
+            });
+
+            // Eval breakdown
+            const evalGrid = document.getElementById('eval-grid');
+            evalGrid.innerHTML = data.eval_breakdown.map(e => {
+                const pct = e.total > 0 ? ((e.pass_count / e.total) * 100) : 0;
+                const cls = pct >= 80 ? 'high' : pct >= 50 ? 'medium' : 'low';
+                return `<div class="eval-item">
+                    <span class="eval-name">${e.name}</span>
+                    <div class="eval-bar-wrap"><div class="eval-bar ${cls}" style="width:${pct}%"></div></div>
+                    <span class="eval-pct">${e.pass_count}/${e.total}</span>
+                </div>`;
+            }).join('');
+
+            // Experiment table
+            const tbody = document.getElementById('experiment-body');
+            if (data.experiments.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:24px;">No experiments yet</td></tr>';
+            } else {
+                tbody.innerHTML = data.experiments.map(e => `
+                    <tr>
+                        <td><strong>${e.id}</strong></td>
+                        <td>${e.score}/${e.max_score} (${e.pass_rate.toFixed(1)}%)</td>
+                        <td><div class="eval-bar-wrap" style="display:inline-block;width:60px;vertical-align:middle;margin-right:8px;"><div class="eval-bar ${e.pass_rate >= 80 ? 'high' : e.pass_rate >= 50 ? 'medium' : 'low'}" style="width:${e.pass_rate}%"></div></div></td>
+                        <td><span class="status-pill pill-${e.status}">${e.status}</span></td>
+                        <td style="color:#555;">${e.description}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        loadData();
+        setInterval(loadData, 10000);
+    </script>
+</body>
+</html>

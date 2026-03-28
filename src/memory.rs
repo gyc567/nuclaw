@@ -934,7 +934,7 @@ impl TieredMemory {
         hot: &Arc<HotMemory>,
         warm: &Arc<WarmMemory>,
         cold: &Arc<ColdMemory>,
-        policy: &MigrationPolicy,
+        _policy: &MigrationPolicy,
     ) -> Result<MaintenanceReport> {
         let mut report = MaintenanceReport {
             hot_to_warm_migrated: 0,

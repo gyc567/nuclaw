@@ -713,7 +713,7 @@ pub struct PooledContainer {
 }
 
 impl PooledContainer {
-    pub async fn run(mut self, mut input: ContainerInput) -> Result<ContainerOutput> {
+    pub async fn run(self, mut input: ContainerInput) -> Result<ContainerOutput> {
         let (container_id, group_folder) = {
             let inner = self.inner.lock().await;
             (inner.container_id.clone(), inner.group_folder.clone())
@@ -818,7 +818,7 @@ impl ContainerPool {
         let mut containers = self.containers.lock().await;
 
         // First, try to find an available container
-        for (id, container) in containers.iter_mut() {
+        for (_id, container) in containers.iter_mut() {
             if !container.in_use && container.group_folder == group_folder {
                 container.in_use = true;
                 return Some(PooledContainer {

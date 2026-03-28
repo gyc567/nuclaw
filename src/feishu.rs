@@ -32,28 +32,18 @@ const DEFAULT_FEISHU_POLL_INTERVAL_MS: u64 = 2000;
 pub const DEFAULT_TEXT_CHUNK_LIMIT: usize = 4000;
 
 /// Feishu client state
+#[derive(Clone)]
 pub struct FeishuClient {
-    /// Feishu App ID
     app_id: String,
-    /// Feishu App Secret
     app_secret: String,
-    /// Current tenant access token
     tenant_access_token: Option<String>,
-    /// Token expiration time
     token_expires_at: Option<std::time::Instant>,
-    /// Webhook path for receiving messages
     webhook_path: String,
-    /// DM policy
     dm_policy: FeishuDMPolicy,
-    /// Allowed groups/chats
     allowed_chats: Vec<String>,
-    /// Registered chats
     registered_chats: HashMap<String, RegisteredGroup>,
-    /// Router state for message deduplication
     router_state: RouterState,
-    /// Database connection
     db: Database,
-    /// Assistant name for trigger detection
     assistant_name: String,
 }
 
@@ -536,7 +526,7 @@ impl FeishuClient {
     }
 
     /// Send a message to a Feishu chat
-    pub async fn send_message(&self, receive_id: &str, text: &str) -> Result<()> {
+    pub async fn send_message(&mut self, receive_id: &str, text: &str) -> Result<()> {
         if text.trim().is_empty() {
             warn!("Skipping empty message");
             return Ok(());
@@ -548,8 +538,9 @@ impl FeishuClient {
             text.len()
         );
 
-        // Get token from shared state (requires mutable access to refresh if needed)
-        // This is a simplified version - in production, you'd want proper token management
+        // Ensure token is valid before sending
+        self.ensure_valid_token().await?;
+
         let token = self.tenant_access_token.as_ref().ok_or_else(|| NuClawError::Feishu {
             message: "Not connected to Feishu".to_string(),
         })?;
@@ -671,25 +662,25 @@ impl FeishuClient {
 }
 
 // Channel trait implementation for registry integration
-#[async_trait]
-impl crate::channels::Channel for FeishuClient {
-    fn name(&self) -> &str {
-        "feishu"
-    }
+    #[async_trait]
+    impl crate::channels::Channel for FeishuClient {
+        fn name(&self) -> &str {
+            "feishu"
+        }
 
-    async fn send(&self, jid: &str, message: &str) -> Result<()> {
-        self.send_message(jid, message).await
-    }
+        async fn send(&self, jid: &str, message: &str) -> Result<()> {
+            let mut client = self.clone();
+            client.send_message(jid, message).await
+        }
 
-    async fn start(&self) -> Result<()> {
-        // This would be handled separately via start_webhook_server
-        Ok(())
-    }
+        async fn start(&self) -> Result<()> {
+            Ok(())
+        }
 
-    fn is_enabled(&self) -> bool {
-        std::env::var("FEISHU_APP_ID").is_ok() && std::env::var("FEISHU_APP_SECRET").is_ok()
+        fn is_enabled(&self) -> bool {
+            std::env::var("FEISHU_APP_ID").is_ok() && std::env::var("FEISHU_APP_SECRET").is_ok()
+        }
     }
-}
 
 // Webhook handlers
 async fn handle_feishu_webhook(

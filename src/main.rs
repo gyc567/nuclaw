@@ -15,6 +15,7 @@ use nuclaw::logging;
 use nuclaw::onboard;
 use nuclaw::task_scheduler::TaskScheduler;
 use nuclaw::telegram;
+use nuclaw::weixin;
 use nuclaw::whatsapp;
 
 use clap::Parser;
@@ -34,6 +35,9 @@ struct Args {
 
     #[arg(long)]
     telegram: bool,
+
+    #[arg(long)]
+    weixin: bool,
 
     #[structopt(long)]
     onboard: bool,

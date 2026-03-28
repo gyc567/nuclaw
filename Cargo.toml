@@ -67,7 +67,7 @@ clap = { version = "4", features = ["derive"] }
 rand = "0.8"
 
 # HTTP client for WhatsApp MCP
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 
 futures = "0.3"
 
@@ -97,6 +97,12 @@ rig-core = "0.32.0"
 
 # WASM runtime for skill hot loading
 extism = "1.0"
+
+# AES encryption for WeChat media decryption
+aes = "0.8"
+cipher = "0.4"
+cbc = { version = "0.1", features = ["alloc"] }
+hex = "0.4"
 
 [dev-dependencies]
 libc = "0.2.180"

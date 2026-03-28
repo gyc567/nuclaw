@@ -41,7 +41,7 @@ pub struct HookRunner;
 
 impl HookRunner {
     pub fn run_hook(
-        hook_type: HookType,
+        _hook_type: HookType,
         script: &str,
         workspace_path: &Path,
     ) -> Result<String, HookError> {

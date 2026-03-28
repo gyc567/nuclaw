@@ -1,0 +1,41 @@
+{
+  "skill_name": "wechat-channel-generator",
+  "status": "complete",
+  "current_experiment": 2,
+  "baseline_score": 63.3,
+  "best_score": 100.0,
+  "experiments": [
+    {
+      "id": 0,
+      "score": 19,
+      "max_score": 30,
+      "pass_rate": 63.3,
+      "status": "baseline",
+      "description": "Original skill — partial modules, custom error types (QrLoginError/WeChatError instead of NuClawError), missing QR login in 2/5 modules, media handling only in 1/5 modules."
+    },
+    {
+      "id": 1,
+      "score": 15,
+      "max_score": 30,
+      "pass_rate": 50.0,
+      "status": "discard",
+      "description": "Added anti-patterns for custom errors + complete modules — WORSE. Agent generated WeChat Web API instead of ilink, used BaseRequest+access_token, introduced syntax errors."
+    },
+    {
+      "id": 2,
+      "score": 30,
+      "max_score": 30,
+      "pass_rate": 100.0,
+      "status": "keep",
+      "description": "Consolidated complete wechat/mod.rs — correct ilink protocol (Bearer auth, ilinkai.weixin.qq.com), NuClawError variants for all errors, QR login, media with AES-128-ECB, security, 20 passing tests."
+    }
+  ],
+  "eval_breakdown": [
+    {"name": "E1: Compilation Success", "pass_count": 3, "total": 3},
+    {"name": "E2: ilink Protocol Compliance", "pass_count": 3, "total": 3},
+    {"name": "E3: NuClaw Architecture", "pass_count": 3, "total": 3},
+    {"name": "E4: QR Code Login Flow", "pass_count": 3, "total": 3},
+    {"name": "E5: Media Handling", "pass_count": 3, "total": 3},
+    {"name": "E6: Security & Robustness", "pass_count": 3, "total": 3}
+  ]
+}

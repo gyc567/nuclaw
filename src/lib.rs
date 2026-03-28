@@ -41,6 +41,8 @@ pub mod telegram;
 pub mod types;
 pub mod utils;
 pub mod whatsapp;
+pub mod wechat;
+pub mod weixin;
 pub mod workflow;
 pub mod workspace;
 pub mod skill_creator;

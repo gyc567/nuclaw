@@ -3,7 +3,7 @@
 //! Generates SKILL.md files from SkillIntent
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::config::skills_dir;
 use crate::error::{NuClawError, Result};

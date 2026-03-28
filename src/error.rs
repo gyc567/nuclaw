@@ -22,6 +22,9 @@ pub enum NuClawError {
     #[error("Feishu error: {message}")]
     Feishu { message: String },
 
+    #[error("WeChat error: {message}")]
+    WeChat { message: String },
+
     #[error("Configuration error: {message}")]
     Config { message: String },
 
@@ -127,6 +130,9 @@ mod tests {
             message: "test".to_string(),
         };
         let _ = NuClawError::Feishu {
+            message: "test".to_string(),
+        };
+        let _ = NuClawError::WeChat {
             message: "test".to_string(),
         };
         let _ = NuClawError::Config {

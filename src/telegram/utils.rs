@@ -68,22 +68,15 @@ pub fn extract_chat_id_pure(jid: &str) -> Option<String> {
     }
 }
 
-/// Check if message is duplicate (pure function)
 pub fn is_duplicate_message_pure(
     msg: &NewMessage,
-    last_timestamp: &str,
-    last_agent_timestamps: &std::collections::HashMap<String, String>,
+    last_message_ids: &std::collections::HashMap<String, String>,
 ) -> bool {
-    if last_timestamp == msg.timestamp {
-        return true;
-    }
-
-    if let Some(agent_ts) = last_agent_timestamps.get(&msg.chat_jid) {
-        if agent_ts == &msg.timestamp {
+    if let Some(last_id) = last_message_ids.get(&msg.chat_jid) {
+        if last_id == &msg.id {
             return true;
         }
     }
-
     false
 }
 
@@ -210,7 +203,7 @@ mod tests {
     #[test]
     fn test_is_duplicate_message_pure() {
         let msg = NewMessage {
-            id: "1".to_string(),
+            id: "2".to_string(),
             chat_jid: "chat1".to_string(),
             sender: "user1".to_string(),
             sender_name: "User".to_string(),
@@ -218,16 +211,14 @@ mod tests {
             timestamp: "123".to_string(),
         };
 
-        let mut last_agent = std::collections::HashMap::new();
+        let mut last_ids = std::collections::HashMap::new();
 
-        // Not duplicate
-        assert!(!is_duplicate_message_pure(&msg, "456", &last_agent));
+        assert!(!is_duplicate_message_pure(&msg, &last_ids));
 
-        // Duplicate by timestamp
-        assert!(is_duplicate_message_pure(&msg, "123", &last_agent));
+        last_ids.insert("chat1".to_string(), "2".to_string());
+        assert!(is_duplicate_message_pure(&msg, &last_ids));
 
-        // Duplicate by agent timestamp
-        last_agent.insert("chat1".to_string(), "123".to_string());
-        assert!(is_duplicate_message_pure(&msg, "456", &last_agent));
+        last_ids.insert("chat1".to_string(), "1".to_string());
+        assert!(!is_duplicate_message_pure(&msg, &last_ids));
     }
 }

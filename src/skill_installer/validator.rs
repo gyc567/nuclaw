@@ -1,7 +1,7 @@
 //! Skill validator with tool whitelist
 
-use std::path::Path;
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use crate::skill_installer::error::{InstallError, Result};
 
@@ -9,7 +9,7 @@ use crate::skill_installer::error::{InstallError, Result};
 /// These tools are considered safe for user-installed skills
 const ALLOWED_TOOLS: &[&str] = &[
     "read",
-    "glob", 
+    "glob",
     "grep",
     "webfetch",
     "websearch",
@@ -22,15 +22,7 @@ const ALLOWED_TOOLS: &[&str] = &[
 ];
 
 /// Dangerous tools that are NOT allowed for external skills
-const FORBIDDEN_TOOLS: &[&str] = &[
-    "bash",
-    "write",
-    "edit",
-    "delete",
-    "mcp",
-    "run",
-    "execute",
-];
+const FORBIDDEN_TOOLS: &[&str] = &["bash", "write", "edit", "delete", "mcp", "run", "execute"];
 
 /// Validated skill with approved tools
 #[derive(Debug, Clone)]
@@ -88,7 +80,9 @@ impl SkillValidator {
     pub fn validate(&self, skill_dir: &Path) -> Result<ValidatedSkill> {
         // Check directory exists
         if !skill_dir.is_dir() {
-            return Err(InstallError::InvalidSkill("Skill directory not found".to_string()));
+            return Err(InstallError::InvalidSkill(
+                "Skill directory not found".to_string(),
+            ));
         }
 
         // Read SKILL.md
@@ -100,13 +94,15 @@ impl SkillValidator {
         let content = std::fs::read_to_string(&skill_md_path)?;
 
         // Parse frontmatter
-        let (frontmatter, body) = parse_frontmatter(&content)
+        let (frontmatter, _body) = parse_frontmatter(&content)
             .ok_or_else(|| InstallError::InvalidSkill("Invalid SKILL.md format".to_string()))?;
 
         // Validate name
         let name = frontmatter.name;
         if name.is_empty() {
-            return Err(InstallError::InvalidSkill("Skill name is empty".to_string()));
+            return Err(InstallError::InvalidSkill(
+                "Skill name is empty".to_string(),
+            ));
         }
 
         // Validate tool permissions
@@ -114,9 +110,11 @@ impl SkillValidator {
 
         // Check if it's a tool skill
         let is_tool_skill = frontmatter.skill_type == "tool";
-        
+
         if is_tool_skill && !self.config.allow_tool_skills {
-            return Err(InstallError::InvalidSkill("Tool skills are not allowed".to_string()));
+            return Err(InstallError::InvalidSkill(
+                "Tool skills are not allowed".to_string(),
+            ));
         }
 
         tracing::info!(
@@ -147,10 +145,7 @@ impl SkillValidator {
         for tool in &requested {
             // Check if tool is forbidden
             if FORBIDDEN_TOOLS.contains(tool) {
-                tracing::warn!(
-                    "Tool '{}' is forbidden for external skills, skipping",
-                    tool
-                );
+                tracing::warn!("Tool '{}' is forbidden for external skills, skipping", tool);
                 continue;
             }
 
@@ -158,10 +153,7 @@ impl SkillValidator {
             if self.config.allowed_tools.contains(&tool.to_string()) {
                 allowed.push(tool.to_string());
             } else {
-                tracing::warn!(
-                    "Tool '{}' not in whitelist, skipping",
-                    tool
-                );
+                tracing::warn!("Tool '{}' not in whitelist, skipping", tool);
             }
         }
 
@@ -212,14 +204,16 @@ mod tests {
     fn test_validator_config_default() {
         let config = ValidatorConfig::default();
         assert!(config.allowed_tools.contains(&"read".to_string()));
-        assert!(config.allowed_tools.contains(&"bash".to_string()));
+        // bash is forbidden for security in external skills
+        assert!(!config.allowed_tools.contains(&"bash".to_string()));
     }
 
     #[test]
     fn test_is_tool_allowed() {
         let validator = SkillValidator::with_defaults();
         assert!(validator.is_tool_allowed("read"));
-        assert!(validator.is_tool_allowed("bash"));
+        // bash is forbidden for security reasons
+        assert!(!validator.is_tool_allowed("bash"));
         assert!(!validator.is_tool_allowed("unknown_tool"));
     }
 
@@ -227,7 +221,7 @@ mod tests {
     fn test_validate_skill() {
         let temp_dir = TempDir::new().unwrap();
         let skill_dir = temp_dir.path();
-        
+
         let content = r#"---
 name: test-skill
 description: A test skill
@@ -236,12 +230,12 @@ allowed-tools: read glob
 
 # Test Skill
 "#;
-        
+
         fs::write(skill_dir.join("SKILL.md"), content).unwrap();
-        
+
         let validator = SkillValidator::with_defaults();
         let result = validator.validate(skill_dir);
-        
+
         assert!(result.is_ok());
         let validated = result.unwrap();
         assert_eq!(validated.name, "test-skill");
@@ -252,7 +246,7 @@ allowed-tools: read glob
     fn test_forbidden_tools_filtered() {
         let temp_dir = TempDir::new().unwrap();
         let skill_dir = temp_dir.path();
-        
+
         let content = r#"---
 name: dangerous-skill
 description: A dangerous skill
@@ -261,12 +255,12 @@ allowed-tools: read bash write
 
 # Dangerous Skill
 "#;
-        
+
         fs::write(skill_dir.join("SKILL.md"), content).unwrap();
-        
+
         let validator = SkillValidator::with_defaults();
         let result = validator.validate(skill_dir);
-        
+
         assert!(result.is_ok());
         let validated = result.unwrap();
         // bash and write should be filtered out

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::context::security::{ContentSanitizer, PathValidator, SecurityError};
+use crate::context::security::{ContentSanitizer, PathValidator};
 
 // Re-export Memory from memory module for backward compatibility
 pub use crate::context::memory::Memory;

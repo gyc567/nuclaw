@@ -4,10 +4,11 @@ use crate::agent_runner::create_runner;
 use crate::config::{assistant_name, data_dir};
 use crate::db::Database;
 use crate::error::{NuClawError, Result};
+use crate::skill_installer::{parse_install_request, GitInstaller};
 use crate::telegram::pairing::PairingManager;
 use crate::telegram::policy::{DMPolicy, GroupPolicy};
 use crate::telegram::types::TelegramMessage;
-use crate::telegram::utils::{extract_chat_id_pure, DEFAULT_TEXT_CHUNK_LIMIT};
+use crate::telegram::utils::{extract_chat_id_pure, is_duplicate_message_pure, DEFAULT_TEXT_CHUNK_LIMIT};
 use crate::types::{NewMessage, RegisteredGroup, RouterState};
 use crate::utils::json::{load_json, save_json};
 
@@ -223,7 +224,7 @@ impl TelegramClient {
         Ok(())
     }
 
-    pub async fn start_webhook_server(mut self) -> Result<()> {
+    pub async fn start_webhook_server(self) -> Result<()> {
         let addr: SocketAddr = std::env::var("TELEGRAM_WEBHOOK_BIND")
             .unwrap_or_else(|_| "0.0.0.0:8787".to_string())
             .parse()
@@ -366,6 +367,30 @@ impl TelegramClient {
         {
             if let Some(response) = self.handle_pairing_code(&content_trimmed, msg).await? {
                 return Ok(Some(response));
+            }
+        }
+
+        // Check for skill installation request
+        if let Some(request) = parse_install_request(&msg.content) {
+            info!("Skill installation request detected: {:?}", request);
+            let installer = GitInstaller::with_defaults();
+            match installer.install(&request).await {
+                Ok(result) => {
+                    let response = format!(
+                        "✅ Skill '{}' installed successfully!\n\n📁 Location: {:?}",
+                        result.name, result.path
+                    );
+                    let chat_id = self.extract_chat_id(&msg.chat_jid)?;
+                    self.send_message(&chat_id.to_string(), &response).await?;
+                    return Ok(Some(response));
+                }
+                Err(e) => {
+                    error!("Skill installation failed: {}", e);
+                    let response = format!("❌ Skill installation failed: {}", e);
+                    let chat_id = self.extract_chat_id(&msg.chat_jid)?;
+                    self.send_message(&chat_id.to_string(), &response).await?;
+                    return Ok(Some(response));
+                }
             }
         }
 
@@ -553,27 +578,13 @@ impl TelegramClient {
     }
 
     async fn is_duplicate_message(&self, msg: &NewMessage) -> bool {
-        let last_timestamp = &self.router_state.last_timestamp;
-        let last_agent = self.router_state.last_agent_timestamp.get(&msg.chat_jid);
-
-        if last_timestamp == &msg.timestamp {
-            return true;
-        }
-
-        if let Some(agent_ts) = last_agent {
-            if agent_ts == &msg.timestamp {
-                return true;
-            }
-        }
-
-        false
+        is_duplicate_message_pure(msg, &self.router_state.last_message_ids)
     }
 
     async fn update_router_state(&mut self, msg: &NewMessage) {
-        self.router_state.last_timestamp = msg.timestamp.clone();
         self.router_state
-            .last_agent_timestamp
-            .insert(msg.chat_jid.clone(), msg.timestamp.clone());
+            .last_message_ids
+            .insert(msg.chat_jid.clone(), msg.id.clone());
 
         let router_state = self.router_state.clone();
         tokio::spawn(async move {
@@ -697,13 +708,7 @@ async fn health_check() -> (StatusCode, &'static str) {
 // Helper functions
 pub fn load_router_state() -> RouterState {
     let state_path = data_dir().join("router_state.json");
-    load_json(
-        &state_path,
-        RouterState {
-            last_timestamp: String::new(),
-            last_agent_timestamp: HashMap::new(),
-        },
-    )
+    load_json(&state_path, RouterState::default())
 }
 
 pub fn load_registered_groups() -> HashMap<String, RegisteredGroup> {
@@ -719,13 +724,11 @@ mod tests {
 
     #[test]
     fn test_load_router_state() {
-        // Set up test environment to avoid reading from real config directory
         let temp_dir = TempDir::new().unwrap();
         env::set_var("NUCLAW_HOME", temp_dir.path());
         
         let state = load_router_state();
-        assert_eq!(state.last_timestamp, "");
-        assert!(state.last_agent_timestamp.is_empty());
+        assert!(state.last_message_ids.is_empty());
         
         env::remove_var("NUCLAW_HOME");
     }

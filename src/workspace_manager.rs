@@ -66,7 +66,7 @@ impl WorkspaceManager {
     /// Create a new session workspace
     pub async fn create_session_workspace(&self, session_id: &str, group_folder: &str) -> Result<Workspace> {
         let workspace_name = format!("session_{}_{}", group_folder, session_id);
-        let mut workspace = Workspace::create_with_session(&workspace_name, session_id)?;
+        let workspace = Workspace::create_with_session(&workspace_name, session_id)?;
         
         // Store in active workspaces
         let mut workspaces = self.workspaces.write().await;

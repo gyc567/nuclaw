@@ -47,6 +47,10 @@ pub enum InstallError {
     /// Skill source not allowed
     #[error("Skill source not allowed: {0}")]
     SourceNotAllowed(String),
+
+    /// Skill not found
+    #[error("Skill not found: {0}")]
+    NotFound(String),
 }
 
 impl From<reqwest::Error> for InstallError {

@@ -60,50 +60,52 @@ impl GitInstaller {
         Self::new(GitInstallerConfig::default())
     }
 
-    /// Install a skill from GitHub URL
     pub async fn install(&self, request: &InstallRequest) -> Result<InstallResult> {
-        // 1. Validate skill name
         let skill_name = request.skill_name();
-        validate_skill_name(skill_name)?;
+        validate_skill_name(&skill_name)?;
 
-        // 2. Check if skill already exists
-        let target_dir = skills_dir().join(skill_name);
+        let target_dir = skills_dir().join(&skill_name);
         if target_dir.exists() && !request.force {
-            return Err(InstallError::AlreadyExists(skill_name.to_string()));
+            return Err(InstallError::AlreadyExists(skill_name.clone()));
         }
 
-        // 3. Ensure temp directory exists
         self.ensure_temp_dir()?;
 
-        // 4. Create unique temp directory for this install
         let temp_skill_dir = self.temp_dir.join(format!(
             "{}_{}",
-            skill_name,
+            &skill_name,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_millis()
         ));
 
-        // 5. Clone the repository (shallow)
         tracing::info!("Cloning {} to {:?}", request.source_url, temp_skill_dir);
         self.clone_shallow(&request.source_url, &temp_skill_dir).await?;
 
-        // 6. Validate cloned content
-        self.validate_clone(&temp_skill_dir)?;
+        let install_dir = if let Some(ref subpath) = request.subpath {
+            let src_dir = temp_skill_dir.join(subpath);
+            let final_dir = skills_dir().join(&skill_name);
+            
+            self.copy_subdirectory(&src_dir, &final_dir)?;
+            
+            final_dir
+        } else {
+            self.validate_clone(&temp_skill_dir)?;
+            
+            let final_dir = skills_dir().join(&skill_name);
+            self.move_to_final(&temp_skill_dir, &final_dir, request.force)?;
+            final_dir
+        };
 
-        // 7. Move to final location (atomic operation)
-        let final_dir = skills_dir().join(skill_name);
-        self.move_to_final(&temp_skill_dir, &final_dir, request.force)?;
-
-        // 8. Cleanup temp directory
+        // 7. Cleanup temp directory
         let _ = self.cleanup_temp_dir();
 
-        tracing::info!("Successfully installed skill '{}' at {:?}", skill_name, final_dir);
+        tracing::info!("Successfully installed skill '{}' at {:?}", skill_name, install_dir);
 
         Ok(InstallResult {
-            name: skill_name.to_string(),
-            path: final_dir,
+            name: skill_name,
+            path: install_dir,
             repo_url: request.source_url.clone(),
         })
     }
@@ -114,56 +116,65 @@ impl GitInstaller {
         Ok(())
     }
 
-    /// Perform shallow clone with timeout
     async fn clone_shallow(&self, url: &str, target: &Path) -> Result<()> {
+        let branches = ["main", "master"];
+        
         let mut cmd = Command::new("git");
         cmd.arg("clone")
            .arg("--depth")
            .arg(self.config.depth.to_string())
            .arg("--single-branch")
-           .arg("--branch")
-           .arg("main")
            .arg(url)
            .arg(target.as_os_str())
-           // Suppress progress output
            .arg("-q")
            .arg("--no-show-current-forced")
-           // Disable interactive prompts
            .env("GIT_TERMINAL_PROMPT", "0")
            .env("GIT_ASKPASS", "echo")
            .env("GIT_EDITOR", "echo");
 
-        // Try main branch first, then master
-        let output = self.run_with_timeout(cmd).await;
+        let first_output = self.run_with_timeout(cmd).await;
 
-        match output {
+        match first_output {
             Ok(o) if o.status.success() => Ok(()),
-            Ok(o) => {
-                // Try master branch
-                let mut cmd = Command::new("git");
-                cmd.arg("clone")
-                   .arg("--depth")
-                   .arg(self.config.depth.to_string())
-                   .arg("--single-branch")
-                   .arg("--branch")
-                   .arg("master")
-                   .arg(url)
-                   .arg(target.as_os_str())
-                   .arg("-q")
-                   .env("GIT_TERMINAL_PROMPT", "0")
-                   .env("GIT_ASKPASS", "echo")
-                   .env("GIT_EDITOR", "echo");
+            _ => {
+                for branch in branches {
+                    let mut cmd = Command::new("git");
+                    cmd.arg("clone")
+                       .arg("--depth")
+                       .arg(self.config.depth.to_string())
+                       .arg("--single-branch")
+                       .arg("--branch")
+                       .arg(branch)
+                       .arg(url)
+                       .arg(target.as_os_str())
+                       .arg("-q")
+                       .env("GIT_TERMINAL_PROMPT", "0")
+                       .env("GIT_ASKPASS", "echo")
+                       .env("GIT_EDITOR", "echo");
 
-                let output = self.run_with_timeout(cmd).await?;
-
-                if output.status.success() {
-                    Ok(())
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    Err(InstallError::GitError(stderr.to_string()))
+                    let output = self.run_with_timeout(cmd).await?;
+                    if output.status.success() {
+                        return Ok(());
+                    }
                 }
+                
+                let stderr = match first_output {
+                    Ok(o) => {
+                        let err = String::from_utf8_lossy(&o.stderr);
+                        if err.contains("Could not find remote branch") {
+                            "Repository branch not found. Please check if the repository exists and the branch name is correct.".to_string()
+                        } else if err.contains("authentication") || err.contains("403") {
+                            "Authentication failed or repository is private. Please check your access rights.".to_string()
+                        } else if err.is_empty() {
+                            "Clone failed for unknown reason".to_string()
+                        } else {
+                            err.to_string()
+                        }
+                    }
+                    Err(e) => format!("Clone failed: {}", e),
+                };
+                Err(InstallError::GitError(stderr))
             }
-            Err(e) => Err(e),
         }
     }
 
@@ -180,12 +191,10 @@ impl GitInstaller {
 
     /// Validate the cloned repository
     fn validate_clone(&self, dir: &Path) -> Result<()> {
-        // Check directory exists
         if !dir.is_dir() {
             return Err(InstallError::InvalidSkill("Clone directory not found".to_string()));
         }
 
-        // Check SKILL.md exists
         let skill_md = dir.join("SKILL.md");
         if !skill_md.exists() {
             return Err(InstallError::InvalidSkill(
@@ -193,17 +202,11 @@ impl GitInstaller {
             ));
         }
 
-        // Check size
         let size_mb = self.get_dir_size_mb(dir)?;
         if size_mb > self.config.max_size_mb as u64 {
             return Err(InstallError::InvalidSkill(
                 format!("Skill too large: {}MB (max {}MB)", size_mb, self.config.max_size_mb)
             ));
-        }
-
-        // Validate skill name matches directory name
-        if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
-            validate_skill_name(name)?;
         }
 
         Ok(())
@@ -251,6 +254,41 @@ impl GitInstaller {
         }
         Ok(())
     }
+
+    fn copy_subdirectory(&self, src: &Path, dest: &Path) -> Result<()> {
+        if !src.exists() {
+            return Err(InstallError::InvalidSkill(
+                format!("Subdirectory not found: {:?}", src)
+            ));
+        }
+
+        if dest.exists() {
+            std::fs::remove_dir_all(dest)?;
+        }
+
+        std::fs::create_dir_all(dest.parent().unwrap_or(dest))?;
+        copy_dir_recursive(src, dest)?;
+        
+        Ok(())
+    }
+}
+
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        std::fs::create_dir_all(dest)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let ty = entry.file_type()?;
+            if ty.is_dir() {
+                copy_dir_recursive(&entry.path(), &dest.join(entry.file_name()))?;
+            } else {
+                std::fs::copy(entry.path(), dest.join(entry.file_name()))?;
+            }
+        }
+    } else {
+        std::fs::copy(src, dest)?;
+    }
+    Ok(())
 }
 
 /// Uninstall a skill

@@ -109,8 +109,7 @@ pub enum AppEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RouterState {
-    pub last_timestamp: String,
-    pub last_agent_timestamp: HashMap<String, String>,
+    pub last_message_ids: HashMap<String, String>,
 }
 
 #[cfg(test)]
@@ -188,11 +187,10 @@ mod tests {
     #[test]
     fn test_router_state() {
         let mut state = RouterState::default();
-        state.last_timestamp = "2025-01-01T00:00:00Z".to_string();
         state
-            .last_agent_timestamp
-            .insert("chat_1".to_string(), "2025-01-01T00:00:00Z".to_string());
-        assert_eq!(state.last_agent_timestamp.len(), 1);
+            .last_message_ids
+            .insert("chat_1".to_string(), "msg_1".to_string());
+        assert_eq!(state.last_message_ids.len(), 1);
     }
 
     #[test]

@@ -3,9 +3,8 @@
 //! Runs evaluation tests on skills and generates reports
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::config::nuclaw_home;
 use crate::error::{NuClawError, Result};
