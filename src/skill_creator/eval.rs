@@ -313,7 +313,6 @@ mod tests {
         
         assert_eq!(result.case_id, 1);
         assert!(result.with_skill);
-        assert!(result.duration_ms >= 0);
     }
 
     #[tokio::test]

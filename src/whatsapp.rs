@@ -18,6 +18,11 @@ use crate::router::EventRouter;
 /// Default WhatsApp poll interval: 2 seconds
 const DEFAULT_WHATSAPP_POLL_INTERVAL_MS: u64 = 2000;
 
+/// Check if WhatsApp is configured via environment variables
+pub fn is_configured() -> bool {
+    std::env::var("WHATSAPP_MCP_URL").is_ok()
+}
+
 /// WhatsApp client state
 pub struct WhatsAppClient {
     /// Connection status

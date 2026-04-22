@@ -16,7 +16,6 @@ use nuclaw::logging;
 use nuclaw::onboard;
 use nuclaw::task_scheduler::TaskScheduler;
 use nuclaw::telegram;
-use nuclaw::weixin;
 use nuclaw::whatsapp;
 
 use clap::Parser;
@@ -157,11 +156,20 @@ async fn run_main_application(db: db::Database) -> Result<()> {
         let _ = scheduler.run().await;
     });
 
-    // Run WhatsApp bot in background
+    // Auto-start WhatsApp bot if WHATSAPP_MCP_URL is configured
+    let whatsapp_db = db.clone();
     let _whatsapp_handle = tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        if whatsapp::is_configured() {
+            info!("Auto-starting WhatsApp bot (WHATSAPP_MCP_URL is set)...");
+            match run_whatsapp_bot_internal(whatsapp_db).await {
+                Ok(_) => info!("WhatsApp bot started successfully"),
+                Err(e) => warn!("Failed to start WhatsApp bot: {}. Continuing without WhatsApp...", e),
+            }
+        } else {
+            info!("WHATSAPP_MCP_URL not set. WhatsApp bot will not auto-start.");
         }
+        // Keep task alive - WhatsApp uses long polling
+        futures::future::pending::<()>().await;
     });
 
     // Auto-start Telegram bot if TELEGRAM_BOT_TOKEN is configured
@@ -267,32 +275,26 @@ async fn run_scheduler(db: db::Database) -> Result<()> {
     Ok(())
 }
 
+/// Internal function to start WhatsApp bot (used by auto-start)
+async fn run_whatsapp_bot_internal(db: db::Database) -> Result<()> {
+    let runtime = std::sync::Arc::new(nuclaw::runtime::DockerRuntime);
+    let router = std::sync::Arc::new(nuclaw::router::EventRouter::new(runtime));
+    let mut client = nuclaw::whatsapp::WhatsAppClient::new(db, router);
+    client.connect().await?;
+    info!("Connected to WhatsApp");
+    client.start_message_listener().await;
+    Ok(())
+}
+
 /// Run the WhatsApp bot
 async fn run_whatsapp_bot(db: db::Database) -> Result<()> {
     info!("Starting WhatsApp bot...");
-
-    // Check if WhatsApp MCP is configured
     if std::env::var("WHATSAPP_MCP_URL").is_err() {
         info!("WHATSAPP_MCP_URL not set. Run with --auth to set up authentication.");
         info!("Then start the WhatsApp MCP server and run with --whatsapp.");
         return Ok(());
     }
-
-    // Create Event Router
-    let runtime = std::sync::Arc::new(nuclaw::runtime::DockerRuntime);
-    let router = std::sync::Arc::new(nuclaw::router::EventRouter::new(runtime));
-
-    // Create WhatsApp client
-    let mut client = nuclaw::whatsapp::WhatsAppClient::new(db, router);
-
-    // Connect to WhatsApp
-    client.connect().await?;
-    info!("Connected to WhatsApp");
-
-    // Start message listener
-    client.start_message_listener().await;
-
-    Ok(())
+    run_whatsapp_bot_internal(db).await
 }
 
 /// Run the authentication flow

@@ -22,7 +22,6 @@ pub mod feishu;
 pub mod logging;
 pub mod maintenance;
 pub mod memory;
-pub mod observer;
 pub mod onboard;
 pub mod orchestrator;
 pub mod providers;

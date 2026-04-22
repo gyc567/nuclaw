@@ -1857,9 +1857,9 @@ mod tier_tests {
         
         let report = tiered.run_maintenance().await.unwrap();
         
-        assert!(report.total_hot >= 0);
-        assert!(report.total_warm >= 0);
-        assert!(report.total_cold >= 0);
+        assert!(report.total_hot == 0);
+        assert!(report.total_warm == 0);
+        assert!(report.total_cold == 0);
         
         // Cleanup
         let _ = fs::remove_file(dir.join("warm_memories.db"));
